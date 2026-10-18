@@ -61,7 +61,9 @@ jobs:
         working-directory: Tests
         run: npx playwright install --with-deps chromium
 
-      - name: Tests - e2e (Playwright)
+      # Playwright starts the built Colyseus server (server/build), which serves
+      # client/dist on port 2567, so both builds above must run first.
+      - name: Tests - e2e (Playwright, against the real server)
         working-directory: Tests
         run: npm run test:e2e
 

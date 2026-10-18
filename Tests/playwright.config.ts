@@ -1,6 +1,8 @@
 import { defineConfig, devices } from '@playwright/test'
 
-const port = 4173
+// The real Colyseus server (server/build) serves client/dist on this port, so
+// e2e tests hit the same server players use. Build client/ and server/ first.
+const port = Number(process.env.E2E_PORT ?? 2567)
 
 export default defineConfig({
   testDir: './e2e',
@@ -12,11 +14,15 @@ export default defineConfig({
     trace: 'on-first-retry',
   },
   projects: [{ name: 'chromium', use: { ...devices['Desktop Chrome'] } }],
-  // Serves the production build of client/, so run `npm run build` in client/ first.
   webServer: {
-    command: `npm run preview -- --port ${port} --strictPort`,
-    cwd: '../client',
-    url: `http://localhost:${port}`,
+    command: 'node build/index.js',
+    cwd: '../server',
+    env: { NODE_ENV: 'production', PORT: String(port) },
+    // /hi is a plain express route; it answers once the server is listening.
+    url: `http://localhost:${port}/hi`,
     reuseExistingServer: !process.env.CI,
+    timeout: 60_000,
+    stdout: 'pipe',
+    stderr: 'pipe',
   },
 })
