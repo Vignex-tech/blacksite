@@ -11,3 +11,18 @@ export const MOVE_MESSAGE = 'move'
 
 /** Width and depth of the square ground, centred on the origin (world units). */
 export const GROUND_SIZE = 40
+
+// Teams (M3, #18). Conventions and the yaw formula are documented in
+// protocol.d.ts. Nothing reads these yet; the server adopts them in #20.
+
+/** The two teams. Equal to the keys of GRAYBOX_MAP.spawnAreas. */
+export const TEAMS = Object.freeze(['ghost', 'warden'])
+
+/** Largest team the room is designed for (up to 4v4). */
+export const MAX_TEAM_SIZE = 4
+
+/**
+ * Max sustained speed per team, in world units per second. The server derives
+ * its per-message step from it (speed / move rate). Tune here only.
+ */
+export const TEAM_SPEED = Object.freeze({ ghost: 2.4, warden: 2.0 })
