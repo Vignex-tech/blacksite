@@ -20,8 +20,10 @@ Last updated 2026-10-18 by the local Claude Code session on the owner's Windows 
 Note on #4: the client must derive its WebSocket URL from `location` (wss on https), not hard-code `ws://localhost:2567`, because the game is shared through an https tunnel.
 
 ## Decisions and open questions
-- Agents (`.claude/agents/`): director, gameplay-engineer, qa-build. Each edits only its own folders. The main session dispatches issues from the director's hand-off table, because subagents can't start other subagents.
-- **Open:** a server-engineer agent was planned for "after the client works", but milestone #1 needs server work (see `Docs/backlog.md`). The owner hasn't decided whether to add it now (recommended) or allow a one-off exception.
+- Agents (`.claude/agents/`): director, gameplay-engineer, server-engineer, qa-build. Each edits only its own folders. The main session dispatches issues from the director's hand-off table, because subagents can't start other subagents.
+- **Decided:** the server-engineer agent was added now, because milestone #1 needs server work. Next step: the director files the server work in `Docs/backlog.md` as a server-engineer issue plus its qa-build check, and links both from #1.
+- `CLAUDE.md` now holds the full game brief and the rules every agent follows (server authority, no hidden-information leaks, URL from `location`). The detailed original brief is the owner's master prompt, kept outside the repo.
+- Env files: `.env` and `.env.*` are git-ignored; only `server/.env.example` is committed.
 - Blender is deferred until the art phase, to save RAM.
 
 ## Running and sharing locally

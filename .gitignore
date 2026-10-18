@@ -2,5 +2,8 @@ node_modules/
 dist/
 build/
 *.log
-.env.local
+# Environment files may hold secrets. Commit only *.env.example templates.
+.env
+.env.*
+!.env.example
 .DS_Store

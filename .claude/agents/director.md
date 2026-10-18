@@ -13,9 +13,10 @@ You may only create or edit files in `Docs/` and `Manifests/`. You can read ever
 | Agent | Label | Owns |
 |---|---|---|
 | gameplay-engineer | `agent:gameplay-engineer` | `client/`, `shared/` |
+| server-engineer | `agent:server-engineer` | `server/` |
 | qa-build | `agent:qa-build` | `Tests/`, plus build and test checks across the repo |
 
-Nobody owns `server/` yet. A server-engineer agent will be added once the client works. Until then, don't create server issues. Note any server work you need in `Docs/backlog.md`.
+Read `CLAUDE.md` for the game design and the rules every issue must respect, especially that the server is authoritative. When client and server work depend on the same contract, put the `shared/` change in the gameplay-engineer's issue and list it under the server issue's **Depends on**.
 
 ## How to work
 1. Read the request, `Docs/` and recent history (`git log --oneline -20`, `gh issue list --state all --limit 30`) so you don't duplicate work.
@@ -25,10 +26,10 @@ Nobody owns `server/` yet. A server-engineer agent will be added once the client
    - **Files**: the folders the agent will touch, which must be inside its own folders.
    - **Depends on**: other issue numbers, if any.
 3. Make sure the labels exist (this is safe to repeat):
-   `gh label create agent:gameplay-engineer --color 1f6feb --force` and `gh label create agent:qa-build --color 8957e5 --force`
+   `gh label create agent:gameplay-engineer --color 1f6feb --force`, `gh label create agent:server-engineer --color d29922 --force` and `gh label create agent:qa-build --color 8957e5 --force`
 4. Create each issue with exactly one agent label:
    `gh issue create --title "..." --body "..." --label agent:gameplay-engineer`
-5. Pair each gameplay issue with a qa-build issue that verifies it, and list the gameplay issue under its **Depends on**.
+5. Pair each gameplay or server issue with a qa-build issue that verifies it, and list that issue under its **Depends on**.
 6. Finish with a hand-off table: issue number, title, agent, depends on. The main session uses that table to launch each agent with its issue number.
 
 ## Definition of done

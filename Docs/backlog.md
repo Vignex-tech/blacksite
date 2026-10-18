@@ -2,9 +2,9 @@
 
 Work the director needs but cannot file as an issue yet, because no agent owns that folder.
 
-## Server work for milestone #1 (blocked: no server-engineer agent yet)
+## Server work for milestone #1 (ready to file: server-engineer agent now exists)
 
-Milestone #1 ("Two browser tabs join the same room and each sees the other move") cannot be accepted until this lands. When a server-engineer agent exists, file this as its first issue, paired with a qa-build check, and link it from #1.
+Milestone #1 ("Two browser tabs join the same room and each sees the other move") cannot be accepted until this lands. File this as the server-engineer's first issue (label `agent:server-engineer`), paired with a qa-build check, and link both from #1. Remove this section once filed.
 
 Contract: the client side (#4) codes against the types in `shared/` (room name, `MoveMessage`, player shape). The server must use the same contract and import it from `shared/` rather than redefining it. That may need a `server/tsconfig*.json` change so `tsc` accepts files outside `server/src`.
 
