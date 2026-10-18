@@ -8,6 +8,10 @@ export default defineConfig({
   testDir: './e2e',
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 1 : 0,
+  // Browser pages joinOrCreate the one shared my_room (maxClients 4). One
+  // worker keeps specs from landing in each other's room and changing the
+  // player counts and boxes they check (e2e/two-players.spec.ts).
+  workers: 1,
   reporter: process.env.CI ? [['list'], ['html', { open: 'never' }]] : 'list',
   use: {
     baseURL: `http://localhost:${port}`,
