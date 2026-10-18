@@ -5,9 +5,13 @@ import { joinGame, sendMove, type PlayerView } from './net.ts'
 import type { Team } from '../../shared/protocol.js'
 import type { Room } from '@colyseus/sdk'
 import { installTestHook } from './testHook.ts'
+import { wrapAngle } from './cameras.ts'
 
 /** How often a held movement key sends a "move" message. */
 const MOVE_SEND_HZ = 20
+
+/** A camera turn smaller than this (radians) doesn't send a yaw-only move. */
+const YAW_SEND_EPSILON = 0.01
 
 /** HUD wording for each team. */
 const TEAM_LABEL: Record<Team, string> = { ghost: 'a Ghost', warden: 'a Warden' }
@@ -43,6 +47,8 @@ try {
 
 if (game) {
   testHook.setMap(game.map.id, game.map.renderedSolids)
+  const rig = game.camera
+  testHook.setCamera(() => ({ mode: rig.mode, yaw: rig.yaw }))
   start(game)
 }
 
@@ -50,9 +56,34 @@ function start(view: GameScene): void {
   const input = new MovementInput()
   let room: Room | null = null
 
+  const rig = view.camera
+  const hint = document.createElement('div')
+  hint.id = 'camera-hint'
+  app.appendChild(hint)
+
+  // One shared 20 Hz tick: held keys are camera-relative intent (strafe dx,
+  // forward dz) sent with the camera yaw; with no key held, a yaw-only move
+  // is sent only when the camera turned. The server decides the actual step.
+  // `lastSentYaw` starts at the camera's starting yaw (the server's), so
+  // nothing is sent until a key is pressed or the mouse turns the camera.
+  let lastSentYaw: number | null = null
   setInterval(() => {
-    const move = input.direction()
-    if (room && move) sendMove(room, move)
+    const locked = document.pointerLockElement === canvas
+    hint.textContent = rig.mode !== 'overhead' && !locked ? 'Click to look around (Esc releases the mouse)' : ''
+    if (!room) return
+    const keys = input.direction()
+    if (rig.mode === 'overhead') {
+      lastSentYaw = null
+      if (keys) sendMove(room, keys) // no yaw: the server keeps the current facing
+      return
+    }
+    const yaw = rig.yaw
+    if (lastSentYaw === null) lastSentYaw = yaw
+    const turned = Math.abs(wrapAngle(yaw - lastSentYaw)) > YAW_SEND_EPSILON
+    if (keys || turned) {
+      sendMove(room, { dx: keys?.dx ?? 0, dz: keys?.dz ?? 0, yaw })
+      lastSentYaw = yaw
+    }
   }, 1000 / MOVE_SEND_HZ)
 
   let playerCount: number | null = null
@@ -70,6 +101,8 @@ function start(view: GameScene): void {
   const watched: PlayerView = {
     upsertPlayer(id, x, z, isLocal = false, pose) {
       inner.upsertPlayer(id, x, z, isLocal, pose)
+      // The camera follows your own player's server position only.
+      if (isLocal) rig.setLocalPlayer(id, x, z, pose?.team ?? null, pose?.yaw ?? 0)
       if (isLocal && pose && pose.team !== localTeam) {
         localTeam = pose.team
         if (room) showOnline()
@@ -90,6 +123,7 @@ function start(view: GameScene): void {
       joined.onLeave(() => {
         room = null
         localTeam = null
+        rig.reset()
         testHook.setDisconnected()
         setStatus('disconnected from server')
       })

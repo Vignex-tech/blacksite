@@ -1,4 +1,4 @@
-import type { BlacksiteSnapshot, BlacksiteTestHook } from '../../shared/testhook.js'
+import type { BlacksiteCameraSnapshot, BlacksiteSnapshot, BlacksiteTestHook } from '../../shared/testhook.js'
 import type { Team } from '../../shared/protocol.js'
 import type { PlayerView } from './net.ts'
 
@@ -22,6 +22,8 @@ export interface TestHookRecorder {
   setDisconnected(): void
   /** Records the rendered map (id and number of solid meshes created). */
   setMap(id: string, renderedSolids: number): void
+  /** Where snapshot() reads the camera from; until set, `camera` is absent. */
+  setCamera(source: () => BlacksiteCameraSnapshot): void
 }
 
 interface PlayerRecord {
@@ -38,10 +40,11 @@ export function installTestHook(target: Window = window): TestHookRecorder {
   let sessionId: string | null = null
   let mapId: string | null = null
   let renderedSolids = 0
+  let cameraSource: (() => BlacksiteCameraSnapshot) | null = null
 
   const hook: BlacksiteTestHook = Object.freeze({
     snapshot(): BlacksiteSnapshot {
-      return {
+      const snap: BlacksiteSnapshot = {
         version: 1,
         connected,
         sessionId,
@@ -51,6 +54,11 @@ export function installTestHook(target: Window = window): TestHookRecorder {
         localTeam: [...players.values()].find((p) => p.isLocal)?.team ?? null,
         map: { id: mapId, renderedSolids },
       }
+      if (cameraSource) {
+        const { mode, yaw } = cameraSource()
+        snap.camera = { mode, yaw }
+      }
+      return snap
     },
   })
 
@@ -87,6 +95,9 @@ export function installTestHook(target: Window = window): TestHookRecorder {
     setMap(id, count) {
       mapId = id
       renderedSolids = count
+    },
+    setCamera(source) {
+      cameraSource = source
     },
   }
 }

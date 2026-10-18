@@ -10,7 +10,7 @@
 //   client was sent). It never adds a server message or synced state.
 // - It ships in the production build, because Playwright tests client/dist.
 // - Versioning: fields are only ever added in version 1 (#22 added `team`,
-//   `yaw` and `localTeam`). `version` is bumped only if a field is removed or
+//   `yaw` and `localTeam`; #24 added `camera`). `version` is bumped only if a field is removed or
 //   changes meaning, so tests should match the fields they need, not the
 //   exact shape.
 
@@ -38,6 +38,24 @@ export interface BlacksitePlayerSnapshot {
   yaw: number
 }
 
+/**
+ * The client's camera (#24): 'overhead' until this client's team is known or
+ * while disconnected, then 'third-person' for a Ghost and 'first-person' for a
+ * Warden.
+ */
+export type CameraMode = 'overhead' | 'third-person' | 'first-person'
+
+export interface BlacksiteCameraSnapshot {
+  mode: CameraMode
+  /**
+   * The client's camera yaw in radians, wrapped to -pi..pi (0 faces +z,
+   * positive turns toward +x). It starts at the local player's server yaw and
+   * changes only on mouse input, so it can lead the server yaw by one move
+   * message. 0 in overhead mode.
+   */
+  yaw: number
+}
+
 export interface BlacksiteSnapshot {
   /** Shape version. Bumped when a field changes meaning or is removed. */
   version: 1
@@ -51,6 +69,11 @@ export interface BlacksiteSnapshot {
   localTeam: Team | null
   /** Rendered map. `{ id: null, renderedSolids: 0 }` until the map is rendered (#14). */
   map: { id: string | null; renderedSolids: number }
+  /**
+   * The client's camera. Present once the game scene (and so a camera) exists;
+   * absent if WebGL failed to start.
+   */
+  camera?: BlacksiteCameraSnapshot
 }
 
 export interface BlacksiteTestHook {
