@@ -3,9 +3,13 @@ import { createGameScene, type GameScene } from './scene.ts'
 import { MovementInput } from './input.ts'
 import { joinGame, sendMove } from './net.ts'
 import type { Room } from '@colyseus/sdk'
+import { installTestHook } from './testHook.ts'
 
 /** How often a held movement key sends a "move" message. */
 const MOVE_SEND_HZ = 20
+
+// Test hook on window.__blacksite (also in production builds; see testHook.ts).
+const testHook = installTestHook()
 
 const app = document.querySelector<HTMLDivElement>('#app')!
 const canvas = document.createElement('canvas')
@@ -53,15 +57,17 @@ function start(view: GameScene): void {
     )
 
   setStatus('connecting...')
-  joinGame(view, (count) => {
+  joinGame(testHook.wrapView(view), (count) => {
     playerCount = count
     if (room) showOnline()
   })
     .then((joined) => {
       room = joined
+      testHook.setConnected(joined.sessionId)
       showOnline()
       joined.onLeave(() => {
         room = null
+        testHook.setDisconnected()
         setStatus('disconnected from server')
       })
       joined.onError((code, message) => console.warn('Room error', code, message))
