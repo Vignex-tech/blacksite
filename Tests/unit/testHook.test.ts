@@ -64,7 +64,7 @@ describe('window.__blacksite test hook', () => {
     const first = hook.snapshot()
     first.connected = false
     first.players[0].x = 1000
-    first.players.push({ id: 'z', x: 0, z: 0, isLocal: false })
+    first.players.push({ id: 'z', x: 0, z: 0, isLocal: false, team: null, yaw: 0 })
     first.map.renderedSolids = 5
     const next = hook.snapshot()
     expect(next).not.toBe(first)
@@ -98,5 +98,77 @@ describe('window.__blacksite test hook', () => {
       ;(hook as unknown as { snapshot: unknown }).snapshot = () => null
     }).toThrow(TypeError)
     expect((target as unknown as { __blacksite: unknown }).__blacksite).toBe(hook)
+  })
+
+  // #23: team, yaw and localTeam (#22), still version 1.
+  it('copies team and yaw per player and localTeam from the local player', () => {
+    const { rec, hook, view, inner } = setup()
+    rec.setConnected('b')
+    view.upsertPlayer('a', 1, 2, false, { team: 'ghost', yaw: 1.25 })
+    view.upsertPlayer('b', 3, 4, true, { team: 'warden', yaw: -Math.PI })
+    // The pose is passed through to the view unchanged.
+    expect(inner.upsertPlayer).toHaveBeenLastCalledWith('b', 3, 4, true, { team: 'warden', yaw: -Math.PI })
+    const s = hook.snapshot()
+    expect(s.version).toBe(1)
+    expect(s.localTeam).toBe('warden')
+    expect(s.players).toEqual([
+      { id: 'a', x: 1, z: 2, isLocal: false, team: 'ghost', yaw: 1.25 },
+      { id: 'b', x: 3, z: 4, isLocal: true, team: 'warden', yaw: -Math.PI },
+    ])
+    // Exactly the version-1 fields: nothing else leaks into the snapshot.
+    expect(Object.keys(s).sort()).toEqual(['connected', 'localTeam', 'map', 'players', 'sessionId', 'version'])
+
+    // Turning and changing team show up in the next snapshot.
+    view.upsertPlayer('a', 1, 2, false, { team: 'ghost', yaw: -0.5 })
+    view.upsertPlayer('b', 3, 4, true, { team: 'ghost', yaw: 0 })
+    const t = hook.snapshot()
+    expect(t.players.map((p) => [p.id, p.team, p.yaw])).toEqual([
+      ['a', 'ghost', -0.5],
+      ['b', 'ghost', 0],
+    ])
+    expect(t.localTeam).toBe('ghost')
+  })
+
+  it('gives team null and yaw 0 without a pose, and localTeam null without a local player or its team', () => {
+    const { rec, hook, view } = setup()
+    expect(hook.snapshot().localTeam).toBeNull()
+    rec.setConnected('me')
+    view.upsertPlayer('other', 0, 0, false, { team: 'warden', yaw: 2 })
+    // Another player's team is never reported as yours.
+    expect(hook.snapshot().localTeam).toBeNull()
+    view.upsertPlayer('me', 0, 0, true)
+    let s = hook.snapshot()
+    expect(s.players.find((p) => p.id === 'me')).toEqual({ id: 'me', x: 0, z: 0, isLocal: true, team: null, yaw: 0 })
+    expect(s.localTeam).toBeNull()
+    view.upsertPlayer('me', 0, 0, true, { team: null, yaw: 0.3 })
+    s = hook.snapshot()
+    expect(s.players.find((p) => p.id === 'me')).toMatchObject({ team: null, yaw: 0.3 })
+    expect(s.localTeam).toBeNull()
+    view.upsertPlayer('me', 0, 0, true, { team: 'ghost', yaw: 0.3 })
+    expect(hook.snapshot().localTeam).toBe('ghost')
+    // Disconnecting clears localTeam with the players.
+    rec.setDisconnected()
+    expect(hook.snapshot()).toMatchObject({ connected: false, players: [], localTeam: null })
+  })
+
+  it('still returns fresh copies with team and yaw: editing them changes nothing', () => {
+    const { rec, hook, view } = setup()
+    rec.setConnected('a')
+    view.upsertPlayer('a', 1, 2, true, { team: 'ghost', yaw: 0.75 })
+    const first = hook.snapshot()
+    first.players[0].team = 'warden'
+    first.players[0].yaw = 3
+    first.localTeam = 'warden'
+    const next = hook.snapshot()
+    expect(next.players).not.toBe(first.players)
+    expect(next.players[0]).not.toBe(first.players[0])
+    expect(next).toEqual({
+      version: 1,
+      connected: true,
+      sessionId: 'a',
+      players: [{ id: 'a', x: 1, z: 2, isLocal: true, team: 'ghost', yaw: 0.75 }],
+      localTeam: 'ghost',
+      map: { id: null, renderedSolids: 0 },
+    })
   })
 })

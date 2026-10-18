@@ -2,7 +2,8 @@ import { expect, test, type Browser, type Page } from '@playwright/test'
 import type { BlacksitePlayerSnapshot, BlacksiteSnapshot } from '../../shared/testhook.js'
 import { BOUND } from '../../server/build/rooms/MyRoom.js'
 import { overlapping, stopAlongZ } from './support/geometry.js'
-import { yawOf } from './support/intent.js'
+import { angleDiff } from './support/intent.js'
+import { expectTeamsAndYaws } from './support/hook.js'
 
 // #15: in the browser, holding a key toward a wall stops the local player
 // flush with the wall, as seen in both tabs. State is read only through
@@ -15,8 +16,9 @@ import { yawOf } from './support/intent.js'
 //
 // Camera-relative movement (#18): W is +z only while the local player faces
 // +z (yaw 0). This test never moves the mouse or clicks the canvas, and checks
-// the snapshot's yaw is 0 (when the field exists) before pressing W. The stop
-// position doesn't depend on the team's speed.
+// the snapshot's yaw is 0 before pressing W. The stop position doesn't depend
+// on the team's speed. Since #22 (verified in #23) every snapshot must carry
+// team, yaw and localTeam, and both tabs agree on A's team.
 
 const VIEWPORT = { width: 800, height: 600 }
 /** Upper bound for short waits. A failure, never a delay. */
@@ -66,7 +68,13 @@ test('holding W toward a wall stops the local player at the wall face, as seen i
     const idA = await joined(a)
     await joined(b)
 
-    const start = get(await snap(a), idA)
+    const sa = await snap(a)
+    const sb = await snap(b)
+    expectTeamsAndYaws(sa)
+    expectTeamsAndYaws(sb)
+    const start = get(sa, idA)
+    expect(get(sb, idA).team, "both tabs agree on A's team").toBe(start.team)
+    expect(sa.localTeam).toBe(start.team)
     expect(overlapping(start).map((s) => s.id), 'A spawned clear of solids').toEqual([])
     // W is +z. The first solid face north of A's spawn (every spawn area has
     // one: the building's south wall or cover for ghosts, its north wall for
@@ -82,10 +90,9 @@ test('holding W toward a wall stops the local player at the wall face, as seen i
       }
     }
 
-    // Precondition for "W is +z": A faces +z (yaw 0, or no yaw field yet).
-    const yaw = (start as { yaw?: unknown }).yaw
-    if (yaw !== undefined) expect(typeof yaw, 'yaw is a number when present').toBe('number')
-    expect(Math.abs(yawOf({ yaw })), `A faces +z (yaw ${String(yaw)})`).toBeLessThan(EPS)
+    // Precondition for "W is +z": A faces +z (yaw 0), in both tabs.
+    expect(angleDiff(start.yaw, 0), `A faces +z (yaw ${start.yaw})`).toBeLessThan(EPS)
+    expect(angleDiff(get(sb, idA).yaw, 0), `tab B sees A facing +z`).toBeLessThan(EPS)
 
     await a.keyboard.down('KeyW')
     try {
@@ -119,7 +126,7 @@ test('holding W toward a wall stops the local player at the wall face, as seen i
           const s = await snap(b)
           watch(s)
           const p = get(s, idA)
-          return Math.abs(p.z - face) < EPS && Math.abs(p.x - start.x) < EPS
+          return Math.abs(p.z - face) < EPS && Math.abs(p.x - start.x) < EPS && p.team === start.team && angleDiff(p.yaw, 0) < EPS
         },
         { message: 'tab B sees A flush with the wall', timeout: WAIT_MS },
       )

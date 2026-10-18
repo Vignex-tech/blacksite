@@ -73,3 +73,8 @@ export function worldStep(dx: number, dz: number, yaw: number, step: number, cap
 export function allowedSteps(dx: number, dz: number, yaw: number, step: number): Vec[] {
   return [worldStep(dx, dz, yaw, step, false), worldStep(dx, dz, yaw, step, true)]
 }
+
+/** Absolute difference of two angles modulo 2 pi, in 0..pi (pi and -pi are the same facing). */
+export function angleDiff(a: number, b: number): number {
+  return Math.abs(Math.atan2(Math.sin(a - b), Math.cos(a - b)))
+}

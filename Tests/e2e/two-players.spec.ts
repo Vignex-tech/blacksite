@@ -1,6 +1,7 @@
 import { expect, test, type Browser, type Page } from '@playwright/test'
 import type { BlacksitePlayerSnapshot, BlacksiteSnapshot } from '../../shared/testhook.js'
-import { yawOf } from './support/intent.js'
+import { angleDiff } from './support/intent.js'
+import { expectTeamsAndYaws } from './support/hook.js'
 
 // Milestone #1 (issue #5), moved onto the client test hook in #12: two browser
 // tabs join the shared room and each sees the other player move.
@@ -17,7 +18,12 @@ import { yawOf } from './support/intent.js'
 // Camera-relative movement (#18): D is +x and W is +z only while the local
 // player faces +z (yaw 0). These tests never move the mouse or click the
 // canvas, so nothing turns the camera, and before each key press they check
-// that the snapshot's yaw is 0 when the field exists (#22 adds it).
+// that the snapshot's yaw is 0.
+//
+// Teams and facing (#22, verified in #23): every snapshot must carry `team`,
+// `yaw` and `localTeam`; both tabs agree on them; the first tab in a fresh
+// room is a Ghost and the second a Warden; the HUD names the tab's own team.
+// A yaw sent by another client is covered in facing.spec.ts.
 //
 // Pages joinOrCreate the shared `my_room`, so the browser specs run on a
 // single worker (playwright.config.ts) and no other spec's page can join.
@@ -102,17 +108,31 @@ async function settle(a: Page, b: Page, ids: string[]): Promise<{ a: BlacksiteSn
 }
 
 /**
- * The local player faces +z: its snapshot yaw is 0, or the field doesn't exist
- * yet. A checked precondition for "W is +z, D is +x".
+ * The local player faces +z: its snapshot yaw is 0 (and every player has a
+ * team and a yaw). A checked precondition for "W is +z, D is +x".
  */
 async function expectLocalFacingPlusZ(page: Page) {
   const s = await snap(page)
-  const local = s.players.find((p) => p.isLocal)
-  expect(local, `${s.sessionId} has a local player`).toBeDefined()
-  const yaw = (local as { yaw?: unknown }).yaw
-  expect(Math.abs(yawOf({ yaw })), `local player faces +z (yaw ${String(yaw)})`).toBeLessThan(EPS)
-  if (yaw !== undefined) expect(typeof yaw, 'yaw is a number when present').toBe('number')
+  expectTeamsAndYaws(s)
+  const local = s.players.find((p) => p.isLocal)!
+  expect(angleDiff(local.yaw, 0), `local player faces +z (yaw ${local.yaw})`).toBeLessThan(EPS)
 }
+
+/** Waits until the tab is connected and sees only its own player; returns that snapshot. */
+async function alone(page: Page): Promise<BlacksiteSnapshot> {
+  await expect
+    .poll(
+      async () => {
+        const s = await snap(page)
+        return s.connected && s.players.length === 1 && s.players[0].isLocal && s.localTeam !== null
+      },
+      { message: 'tab is connected, alone in the room, with a team', timeout: WAIT_MS },
+    )
+    .toBe(true)
+  return snap(page)
+}
+
+const HUD_TEAM = { ghost: 'a Ghost', warden: 'a Warden' } as const
 
 /**
  * Holds `key` in `page` until `done(snapshot of page)` holds, then releases it.
@@ -131,20 +151,57 @@ async function holdUntil(page: Page, key: string, what: string, done: (s: Blacks
 test('test hook: snapshot shape, one local player, and a copy per call', async ({ browser }) => {
   test.setTimeout(60_000)
   const a = await openPlayer(browser)
-  const b = await openPlayer(browser)
+  let b: Page | undefined
   try {
+    // A is alone in a fresh room: the server makes it a Ghost (ties go to ghost).
+    const first = await alone(a)
+    expectTeamsAndYaws(first)
+    expect(first.localTeam, '1st joiner in a fresh room is a ghost').toBe('ghost')
+    await expect(a.locator('#hud')).toHaveText(/online, 1 player, you are a Ghost$/, { timeout: WAIT_MS })
+    b = await openPlayer(browser)
     const idA = await joined(a)
     const idB = await joined(b)
     expect(idA).not.toBe(idB)
+
+    // Teams and facing: both tabs agree on every player's team and yaw, A is
+    // the ghost and B the warden, everyone spawned facing +z, and localTeam is
+    // the tab's own team.
+    const wantTeam: Record<string, string> = { [idA]: 'ghost', [idB]: 'warden' }
+    const sa = await snap(a)
+    const sb = await snap(b)
+    for (const s of [sa, sb]) {
+      expectTeamsAndYaws(s)
+      for (const p of s.players) {
+        expect(p.team, `${s.sessionId} sees ${p.id} as ${wantTeam[p.id]}`).toBe(wantTeam[p.id])
+        expect(angleDiff(p.yaw, 0), `${s.sessionId} sees ${p.id} facing +z (yaw ${p.yaw})`).toBeLessThan(EPS)
+      }
+    }
+    expect(sa.localTeam).toBe('ghost')
+    expect(sb.localTeam).toBe('warden')
+    for (const p of sa.players) {
+      const q = get(sb, p.id)
+      expect(q.team, `both tabs agree on ${p.id}'s team`).toBe(p.team)
+      expect(angleDiff(q.yaw, p.yaw), `both tabs agree on ${p.id}'s yaw`).toBeLessThan(EPS)
+    }
+
+    // The HUD names each tab's own team.
+    await expect(a.locator('#hud')).toHaveText(/online, 2 players, you are a Ghost$/, { timeout: WAIT_MS })
+    await expect(b.locator('#hud')).toHaveText(/online, 2 players, you are a Warden$/, { timeout: WAIT_MS })
+    for (const [page, s] of [
+      [a, sa],
+      [b, sb],
+    ] as const) {
+      await expect(page.locator('#hud')).toContainText(`you are ${HUD_TEAM[s.localTeam!]}`)
+    }
 
     for (const [page, own] of [
       [a, idA],
       [b, idB],
     ] as const) {
       const s = await snap(page)
-      // Version-1 fields only: fields may be added in version 1 (#22 adds team
-      // and yaw), so the shape is matched, not compared exactly.
-      expect(s).toMatchObject({ version: 1, connected: true, sessionId: own })
+      // Version-1 fields: fields may be added in version 1, so the shape is
+      // matched, not compared exactly. team, yaw and localTeam (#22) are required.
+      expect(s).toMatchObject({ version: 1, connected: true, sessionId: own, localTeam: expect.any(String) })
       expect(s.version).toBe(1)
       for (const p of s.players) {
         expect(p).toMatchObject({
@@ -152,6 +209,8 @@ test('test hook: snapshot shape, one local player, and a copy per call', async (
           x: expect.any(Number),
           z: expect.any(Number),
           isLocal: expect.any(Boolean),
+          team: expect.any(String),
+          yaw: expect.any(Number),
         })
       }
       // Both tabs know the same two players, sorted by id.
@@ -172,7 +231,10 @@ test('test hook: snapshot shape, one local player, and a copy per call', async (
         first.sessionId = 'forged'
         first.players[0].x += 1000
         first.players[0].isLocal = !first.players[0].isLocal
-        first.players.push({ id: 'ghost', x: 0, z: 0, isLocal: false })
+        first.players[0].team = first.players[0].team === 'ghost' ? 'warden' : 'ghost'
+        first.players[0].yaw += 1
+        first.localTeam = first.localTeam === 'ghost' ? 'warden' : 'ghost'
+        first.players.push({ id: 'forged', x: 0, z: 0, isLocal: false, team: 'ghost', yaw: 1 })
         first.map.renderedSolids = 99
         const next = window.__blacksite.snapshot()
         return {
@@ -198,7 +260,7 @@ test('test hook: snapshot shape, one local player, and a copy per call', async (
     }
   } finally {
     await a.context().close()
-    await b.context().close()
+    await b?.context().close()
   }
 })
 
