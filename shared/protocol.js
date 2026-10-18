@@ -26,3 +26,53 @@ export const MAX_TEAM_SIZE = 4
  * its per-message step from it (speed / move rate). Tune here only.
  */
 export const TEAM_SPEED = Object.freeze({ ghost: 2.4, warden: 2.0 })
+
+// Vertical movement (M4, #27). Meanings and conventions are documented in
+// protocol.d.ts. Nothing reads these yet; the server applies them from #29
+// (gravity, floors, ramps, jumps) and #31 (climbing and hanging).
+
+/**
+ * Movement modes, in player state. `falling` is any time in the air (rising
+ * after a jump, or falling); `climbing` is attached to a climb anchor;
+ * `hanging` is hanging from a ledge anchor.
+ */
+export const MOVEMENT_MODES = Object.freeze(['ground', 'falling', 'climbing', 'hanging'])
+
+/** Message type for a discrete action. Payload: ActionMessage. */
+export const ACTION_MESSAGE = 'action'
+
+/** The actions an ActionMessage may name. */
+export const ACTIONS = Object.freeze(['jump', 'climb', 'drop'])
+
+// Tuning constants. Each is changeable here, and only here (owner decisions
+// on #26). Units: world units (u), seconds (s).
+
+/** Downward acceleration while falling, in u/s^2. */
+export const GRAVITY = 20
+
+/** Fastest downward speed while falling, in u/s. */
+export const MAX_FALL_SPEED = 20
+
+/**
+ * Upward speed at the start of a jump, per team, in u/s. The apex is
+ * speed^2 / (2 * GRAVITY): about 0.51 for a Ghost. 0 means the team can't jump.
+ */
+export const JUMP_SPEED = Object.freeze({ ghost: 4.5, warden: 0 })
+
+/** The most a walking move may raise the feet, in u. */
+export const STEP_HEIGHT = 0.35
+
+/** Speed along a climb anchor while climbing, in u/s. */
+export const CLIMB_SPEED = 1.5
+
+/** Speed along a ledge anchor while hanging, in u/s. */
+export const SHIMMY_SPEED = 1.0
+
+/** Largest horizontal distance from a player's centre to an anchor that still counts as in range, in u. */
+export const ANCHOR_RANGE = 0.8
+
+/** Vertical slack for grabbing a ledge: the hands (y + PLAYER_HEIGHT) within this of the ledge's y, in u. */
+export const ANCHOR_REACH = 0.6
+
+/** Which teams may climb and hang (rule 5: only on authored anchors). */
+export const CAN_CLIMB = Object.freeze({ ghost: true, warden: false })

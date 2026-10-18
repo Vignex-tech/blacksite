@@ -73,6 +73,17 @@ export interface PlayerState {
    * the server spawns every player with yaw 0 (facing +z).
    */
   yaw: number
+  /**
+   * Feet height in world units (M4, #27): 0 on the ground floor,
+   * `UPPER_LEVEL_Y` (3) on the upper level. Optional until the client issue
+   * (#33) makes it required; a missing value means 0.
+   */
+  y?: number
+  /**
+   * Movement mode (M4, #27). Optional until #33 makes it required; a missing
+   * value means `'ground'`.
+   */
+  mode?: MovementMode
 }
 
 /** Minimal read-only view of a map keyed by string (MapSchema satisfies it). */
@@ -86,3 +97,101 @@ export interface ReadonlyKeyedMap<V> {
 export interface GameRoomState {
   players: ReadonlyKeyedMap<PlayerState>
 }
+
+// ---------------------------------------------------------------------------
+// Vertical movement (M4, #27). Runtime values live in protocol.js. Nothing
+// reads them until the server applies them (#29: gravity, floors, ramps,
+// jumps; #31: climbing and hanging). Each constant is changeable in
+// protocol.js, and only there (owner decisions on #26).
+
+/**
+ * Movement modes, frozen: `['ground', 'falling', 'climbing', 'hanging']`.
+ * - `ground`: standing on the ground, a floor top or a ramp.
+ * - `falling`: in the air, rising after a jump or falling.
+ * - `climbing`: attached to a climb anchor (`kind: 'climb'`, shared/map.js).
+ * - `hanging`: hanging from a ledge anchor (`kind: 'ledge'`).
+ */
+export declare const MOVEMENT_MODES: readonly ['ground', 'falling', 'climbing', 'hanging']
+export type MovementMode = 'ground' | 'falling' | 'climbing' | 'hanging'
+
+/** Message type the client sends for a discrete action. Payload: ActionMessage. */
+export declare const ACTION_MESSAGE: 'action'
+
+/** The actions, frozen: `['jump', 'climb', 'drop']`. */
+export declare const ACTIONS: readonly ['jump', 'climb', 'drop']
+export type Action = 'jump' | 'climb' | 'drop'
+
+/**
+ * Payload of the "action" message.
+ *
+ * - `jump`: only from `ground`. Starts a jump at `JUMP_SPEED[team]` (mode
+ *   becomes `falling`). A team whose jump speed is 0 is refused.
+ * - `climb`: a context action, only for teams with `CAN_CLIMB[team]`
+ *   (Ghosts). From `ground` or `falling`:
+ *   - within `ANCHOR_RANGE` (horizontally) of a climb anchor, it attaches to
+ *     it (`climbing`);
+ *   - within reach of a ledge anchor (horizontally within `ANCHOR_RANGE` of
+ *     the ledge segment, and the hands, at `y + PLAYER_HEIGHT`, within
+ *     `ANCHOR_REACH` of the ledge's y), it grabs the ledge (`hanging`).
+ *   While `hanging`, it mantles onto the walkable surface above the ledge,
+ *   if a player box fits there (mode becomes `ground`).
+ * - `drop`: from `climbing` or `hanging`, let go (`falling`).
+ *
+ * The message carries no anchor id and no position: the server picks the
+ * nearest valid anchor from the player's own server position, so there is
+ * nothing to forge. Anything else (not a non-array object, `action` not one
+ * of `ACTIONS`) is ignored, and extra fields are never read. Actions have
+ * their own server-side rate limit, separate from moves.
+ *
+ * Moves while attached (the `move` message keeps its shape):
+ * - `climbing`: `dz` is up (+1) or down (-1) along the anchor at
+ *   `CLIMB_SPEED`; `dx` is ignored.
+ * - `hanging`: `dx` shimmies along the ledge at `SHIMMY_SPEED` (+1 is to the
+ *   player's right when facing the ledge's `facing`); `dz` is ignored.
+ * - In both, `yaw` is still stored.
+ */
+export interface ActionMessage {
+  action: Action
+}
+
+/** Downward acceleration while falling: 20 u/s^2. */
+export declare const GRAVITY: 20
+
+/** Fastest downward speed while falling: 20 u/s. */
+export declare const MAX_FALL_SPEED: 20
+
+/**
+ * Upward speed at the start of a jump, per team, in u/s, frozen:
+ * `{ ghost: 4.5, warden: 0 }`. Apex height is `speed^2 / (2 * GRAVITY)`,
+ * about 0.51 for a Ghost: too low to reach low cover (1.2) even with
+ * `STEP_HEIGHT`, or the upper level. Wardens (0) can't jump.
+ */
+export declare const JUMP_SPEED: Readonly<Record<Team, number>>
+
+/**
+ * The most a walking move may raise the feet: 0.35 u. Ramps and floor edges
+ * within this are walked onto; anything taller blocks (cover at 1.2 does).
+ */
+export declare const STEP_HEIGHT: 0.35
+
+/** Speed along a climb anchor while climbing: 1.5 u/s. */
+export declare const CLIMB_SPEED: 1.5
+
+/** Speed along a ledge anchor while hanging: 1.0 u/s. */
+export declare const SHIMMY_SPEED: 1
+
+/**
+ * Largest horizontal distance (on x, z) from a player's centre to an anchor
+ * (a climb anchor's point, or the nearest point of a ledge segment) that is
+ * still in range: 0.8 u.
+ */
+export declare const ANCHOR_RANGE: 0.8
+
+/**
+ * Vertical slack for grabbing a ledge: 0.6 u. A ledge at height `ly` is in
+ * reach when `|y + PLAYER_HEIGHT - ly| <= ANCHOR_REACH`.
+ */
+export declare const ANCHOR_REACH: 0.6
+
+/** Which teams may climb and hang, frozen: `{ ghost: true, warden: false }`. */
+export declare const CAN_CLIMB: Readonly<Record<Team, boolean>>

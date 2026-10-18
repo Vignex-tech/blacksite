@@ -26,9 +26,27 @@ const TERMINAL_HEIGHT = 1
 
 const HALF = GROUND_SIZE / 2
 
+/**
+ * Walking height of the upper service level (the top of its floors). Equal to
+ * the wall height, so the west wall's top is flush with the mezzanine.
+ */
+export const UPPER_LEVEL_Y = 3
+/** Thickness of upper-level floor slabs. */
+const SLAB = 0.2
+/** Feet height of a climber whose hands (feet + PLAYER_HEIGHT) are at the upper level. */
+const CLIMB_TOP_Y = 1.2 // UPPER_LEVEL_Y - PLAYER_HEIGHT, written exactly
+/** Yaw facing +x (east) and +z (north); see MoveMessage in protocol.d.ts. */
+const FACE_EAST = Math.PI / 2
+const FACE_NORTH = 0
+
 /** Axis-aligned box from (x0, z0) to (x1, z1) on the floor, `height` tall. */
 function box(id, kind, x0, z0, x1, z1, height) {
   return { id, kind, min: { x: x0, y: 0, z: z0 }, max: { x: x1, y: height, z: z1 } }
+}
+
+/** Upper-level floor slab from (x0, z0) to (x1, z1), walkable at UPPER_LEVEL_Y. */
+function slab(id, x0, z0, x1, z1) {
+  return { id, min: { x: x0, y: UPPER_LEVEL_Y - SLAB, z: z0 }, max: { x: x1, y: UPPER_LEVEL_Y, z: z1 } }
 }
 
 function deepFreeze(value) {
@@ -81,5 +99,39 @@ export const GRAYBOX_MAP = deepFreeze({
   terminals: [
     { id: 'terminal-a', x: -7.5, y: TERMINAL_HEIGHT, z: -5.5 },
     { id: 'terminal-b', x: 7.5, y: TERMINAL_HEIGHT, z: 5.5 },
+  ],
+  // Upper service level (M4, #27). Routes up:
+  // - Stairs (anyone): `stairs-west` rises north from the ground (z 0.5) to
+  //   `landing-nw`, which joins the mezzanine.
+  // - `climb-west` (Ghosts): outside the west wall, up to `ledge-west-wall`,
+  //   then mantle onto the wall top and the mezzanine.
+  // - `climb-east` (Ghosts): inside the east wall, up to
+  //   `ledge-east-platform`, then mantle onto the east platform.
+  // The mezzanine, landing, catwalk and east platform are one connected
+  // walkable level at UPPER_LEVEL_Y. No railings: walking off an edge falls.
+  floors: [
+    // Mezzanine along the inside of the west wall.
+    slab('mezz-west', -9.5, -1, -7.5, 7.5),
+    // Top of the stairs, east of the mezzanine's north end.
+    slab('landing-nw', -7.5, 6, -5.75, 7.5),
+    // Overhead catwalk across the interior, from the mezzanine to the east platform.
+    slab('catwalk', -7.5, -1, 6, 0.5),
+    // Small platform inside the east wall, south of the east doorway.
+    slab('platform-east', 6, -2, 9.5, 1.5),
+  ],
+  ramps: [
+    // Stairs up to the mezzanine (the Warden route). Run 5.5, rise 3, slope ~0.55.
+    { id: 'stairs-west', minX: -7.5, maxX: -5.75, minZ: 0.5, maxZ: 6, low: 0, high: UPPER_LEVEL_Y, rises: '+z' },
+  ],
+  anchors: [
+    // Outside the west wall (face x = -10), from the yard to the wall top.
+    { id: 'climb-west', kind: 'climb', x: -10.5, z: 4.5, facing: FACE_EAST, minY: 0, maxY: CLIMB_TOP_Y, ledgeId: 'ledge-west-wall' },
+    { id: 'ledge-west-wall', kind: 'ledge', x0: -10.5, z0: 2.5, x1: -10.5, z1: 6.5, y: UPPER_LEVEL_Y, facing: FACE_EAST },
+    // Inside the east wall (face x = 9.5), just south of the east platform.
+    { id: 'climb-east', kind: 'climb', x: 9, z: -2.5, facing: FACE_EAST, minY: 0, maxY: CLIMB_TOP_Y, ledgeId: 'ledge-east-platform' },
+    { id: 'ledge-east-platform', kind: 'ledge', x0: 6.75, z0: -2.5, x1: 9, z1: -2.5, y: UPPER_LEVEL_Y, facing: FACE_NORTH },
+    // South edges of the mezzanine and the catwalk (edge z = -1), to hang from and drop.
+    { id: 'ledge-mezz-south', kind: 'ledge', x0: -9, z0: -1.5, x1: -7.5, z1: -1.5, y: UPPER_LEVEL_Y, facing: FACE_NORTH },
+    { id: 'ledge-catwalk-south', kind: 'ledge', x0: -7.5, z0: -1.5, x1: 5.5, z1: -1.5, y: UPPER_LEVEL_Y, facing: FACE_NORTH },
   ],
 })
