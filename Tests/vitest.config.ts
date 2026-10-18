@@ -4,7 +4,7 @@ export default defineConfig({
   test: {
     include: ['unit/**/*.test.ts'],
     environment: 'jsdom',
-    // No unit tests exist yet (the Vite starter counter test was retired in #3).
+    // Kept so an empty run (e.g. a filtered one) does not fail.
     passWithNoTests: true,
   },
 })

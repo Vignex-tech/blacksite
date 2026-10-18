@@ -1,168 +1,250 @@
 import { expect, test, type Browser, type Page } from '@playwright/test'
+import type { BlacksitePlayerSnapshot, BlacksiteSnapshot } from '../../shared/testhook.js'
 
-// Milestone #1 (issue #5): two browser tabs join the shared room and each sees
-// the other's box move.
+// Milestone #1 (issue #5), moved onto the client test hook in #12: two browser
+// tabs join the shared room and each sees the other player move.
 //
-// What each tab sees is read from the rendered canvas itself: a screenshot of
-// #game-canvas is decoded in the page and split by colour. The client draws
-// its own box blue and every other player's box orange (client/src/scene.ts),
-// on a grey ground and a near-black background, so in each tab:
-//   blue   = this tab's player
-//   orange = the other tab's player
-// Both tabs use the same viewport and the same fixed camera, so a box at the
-// same world position lands on the same pixels in both tabs.
+// What each tab knows is read from `window.__blacksite.snapshot()` (types in
+// shared/testhook.d.ts, implemented in client/src/testHook.ts). Nothing here
+// depends on colours, the camera, the HUD text or pixels, so rendering the map
+// (#14) and new spawn rules (#13) don't affect it. Players are looked up by
+// sessionId, never by list order or by where they spawned.
+//
+// Movement thresholds are small (MOVE_UNITS) so a held key can't carry a
+// player from any spawn point into a wall before the key is released.
 //
 // Pages joinOrCreate the shared `my_room`, so the browser specs run on a
-// single worker (playwright.config.ts) and no other spec's page can add boxes.
+// single worker (playwright.config.ts) and no other spec's page can join.
 
 const VIEWPORT = { width: 800, height: 600 }
 /** Upper bound for one wait. A failure, never a delay. */
 const WAIT_MS = 10_000
-/** Same position seen in two tabs: centroids agree within this (anti-aliased edges). */
-const SAME_PX = 1.5
-/** A box that must not move: its centroid changes by less than this. */
-const STILL_PX = 0.75
+/** Synced numbers are float32 on the wire; the same value in two tabs agrees within this. */
+const EPS = 1e-4
+/** How far a held key must move A (world units; SPEED is 0.1 per move, about 20 moves/s). */
+const MOVE_UNITS = 0.3
+/** Short, fixed poll intervals so a held key is released soon after the goal is reached. */
+const FAST_POLL = { intervals: [50], timeout: WAIT_MS }
 
-interface Blob2D {
-  /** Pixel count; 0 when the colour is not on screen. */
-  n: number
-  /** Centroid in canvas pixels (NaN when n is 0). */
-  x: number
-  y: number
-}
-interface Boxes {
-  blue: Blob2D
-  orange: Blob2D
+async function snap(page: Page): Promise<BlacksiteSnapshot> {
+  return page.evaluate(() => window.__blacksite.snapshot())
 }
 
-/** Screenshots the canvas and returns the blue and orange box centroids. */
-async function boxes(page: Page): Promise<Boxes> {
-  const png = await page.locator('#game-canvas').screenshot()
-  return page.evaluate(async (b64: string) => {
-    const bytes = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0))
-    const bmp = await createImageBitmap(new Blob([bytes], { type: 'image/png' }))
-    const canvas = new OffscreenCanvas(bmp.width, bmp.height)
-    const ctx = canvas.getContext('2d')!
-    ctx.drawImage(bmp, 0, 0)
-    const { data, width, height } = ctx.getImageData(0, 0, bmp.width, bmp.height)
-    const acc = { blue: { n: 0, sx: 0, sy: 0 }, orange: { n: 0, sx: 0, sy: 0 } }
-    for (let y = 0; y < height; y++) {
-      for (let x = 0; x < width; x++) {
-        const i = (y * width + x) * 4
-        const r = data[i]
-        const g = data[i + 1]
-        const b = data[i + 2]
-        // Ground and background are near-grey (r ~ g ~ b); the HUD text is light grey.
-        const key = b > 70 && b > r + 50 ? 'blue' : r > 70 && r > b + 50 && r > g + 25 ? 'orange' : null
-        if (!key) continue
-        acc[key].n++
-        acc[key].sx += x
-        acc[key].sy += y
-      }
-    }
-    const blob = (a: { n: number; sx: number; sy: number }) => ({ n: a.n, x: a.sx / a.n, y: a.sy / a.n })
-    return { blue: blob(acc.blue), orange: blob(acc.orange) }
-  }, png.toString('base64'))
+function find(s: BlacksiteSnapshot, id: string): BlacksitePlayerSnapshot | undefined {
+  return s.players.find((p) => p.id === id)
 }
+
+function get(s: BlacksiteSnapshot, id: string): BlacksitePlayerSnapshot {
+  const p = find(s, id)
+  if (!p) throw new Error(`player ${id} missing from ${s.sessionId}'s snapshot`)
+  return p
+}
+
+const same = (p: { x: number; z: number }, q: { x: number; z: number }) =>
+  Math.abs(p.x - q.x) < EPS && Math.abs(p.z - q.z) < EPS
 
 async function openPlayer(browser: Browser): Promise<Page> {
   const context = await browser.newContext({ viewport: VIEWPORT })
   const page = await context.newPage()
   await page.goto('/')
+  // Sanity check that the scene started (not a pixel check).
   await expect(page.locator('#game-canvas')).toHaveAttribute('data-engine', /^Babylon\.js/)
   return page
 }
 
-const near = (a: Blob2D, b: Blob2D, px: number) => Math.abs(a.x - b.x) < px && Math.abs(a.y - b.y) < px
-
-/**
- * Waits until A's box has stopped moving and is drawn at the same place in
- * both tabs (A's blue in page A matches A's orange in page B). Returns the
- * settled view of both tabs.
- */
-async function settle(a: Page, b: Page): Promise<{ a: Boxes; b: Boxes }> {
-  let prev: Boxes | null = null
-  let last: { a: Boxes; b: Boxes } | null = null
+/** Waits until the tab is connected and knows two players; returns its sessionId. */
+async function joined(page: Page): Promise<string> {
   await expect
     .poll(
       async () => {
-        const va = await boxes(a)
-        const vb = await boxes(b)
-        const still = prev !== null && near(prev.blue, va.blue, 0.25)
-        prev = va
-        last = { a: va, b: vb }
-        return still && vb.orange.n > 0 && near(va.blue, vb.orange, SAME_PX)
+        const s = await snap(page)
+        return s.connected && s.sessionId !== null && s.players.length === 2
       },
-      { message: "A's box settles at the same place in both tabs", timeout: WAIT_MS },
+      { message: 'tab is connected and sees 2 players', timeout: WAIT_MS },
+    )
+    .toBe(true)
+  return (await snap(page)).sessionId!
+}
+
+/**
+ * Waits until both tabs agree on every player's position and nothing changed
+ * since the previous poll (all moves sent so far have been applied and synced).
+ * Returns both settled snapshots.
+ */
+async function settle(a: Page, b: Page, ids: string[]): Promise<{ a: BlacksiteSnapshot; b: BlacksiteSnapshot }> {
+  let prev: BlacksiteSnapshot | null = null
+  let last: { a: BlacksiteSnapshot; b: BlacksiteSnapshot } | null = null
+  await expect
+    .poll(
+      async () => {
+        const sa = await snap(a)
+        const sb = await snap(b)
+        const p = prev
+        prev = sa
+        last = { a: sa, b: sb }
+        return ids.every((id) => {
+          const pa = find(sa, id)
+          const pb = find(sb, id)
+          const pp = p && find(p, id)
+          return !!pa && !!pb && !!pp && same(pa, pb) && same(pa, pp)
+        })
+      },
+      { message: 'both tabs agree on every position and it is stable', intervals: [150], timeout: WAIT_MS },
     )
     .toBe(true)
   return last!
 }
 
-/** Holds `key` in page A until `done(viewOfA)` holds, then releases it. */
-async function holdUntil(a: Page, key: string, what: string, done: (v: Boxes) => boolean): Promise<void> {
-  await a.keyboard.down(key)
+/** Holds `key` in `page` until `done(snapshot of page)` holds, then releases it. */
+async function holdUntil(page: Page, key: string, what: string, done: (s: BlacksiteSnapshot) => boolean) {
+  await page.keyboard.down(key)
   try {
-    await expect.poll(async () => done(await boxes(a)), { message: what, timeout: WAIT_MS }).toBe(true)
+    await expect.poll(async () => done(await snap(page)), { message: what, ...FAST_POLL }).toBe(true)
   } finally {
-    await a.keyboard.up(key)
+    await page.keyboard.up(key)
   }
 }
 
+test('test hook: snapshot shape, one local player, and a copy per call', async ({ browser }) => {
+  test.setTimeout(60_000)
+  const a = await openPlayer(browser)
+  const b = await openPlayer(browser)
+  try {
+    const idA = await joined(a)
+    const idB = await joined(b)
+    expect(idA).not.toBe(idB)
+
+    for (const [page, own] of [
+      [a, idA],
+      [b, idB],
+    ] as const) {
+      const s = await snap(page)
+      expect(s.version).toBe(1)
+      expect(s.connected).toBe(true)
+      expect(s.sessionId).toBe(own)
+      // Both tabs know the same two players, sorted by id.
+      expect(s.players.map((p) => p.id)).toEqual([idA, idB].sort())
+      // Exactly one player is local, and it is this tab's sessionId.
+      const local = s.players.filter((p) => p.isLocal)
+      expect(local).toHaveLength(1)
+      expect(local[0].id).toBe(own)
+      for (const p of s.players) {
+        expect(Number.isFinite(p.x) && Number.isFinite(p.z), `finite position for ${p.id}`).toBe(true)
+      }
+
+      // snapshot() returns a fresh copy: changing one doesn't change the next.
+      const untouched = await page.evaluate(() => {
+        const first = window.__blacksite.snapshot()
+        const before = JSON.stringify(first)
+        first.connected = false
+        first.sessionId = 'forged'
+        first.players[0].x += 1000
+        first.players[0].isLocal = !first.players[0].isLocal
+        first.players.push({ id: 'ghost', x: 0, z: 0, isLocal: false })
+        first.map.renderedSolids = 99
+        const next = window.__blacksite.snapshot()
+        return {
+          sameObject: next === first,
+          sharedPlayers: next.players === first.players,
+          // Positions can change between the calls only if a state update
+          // arrived; nobody pressed a key, so they don't.
+          equal: JSON.stringify(next) === before,
+        }
+      })
+      expect(untouched).toEqual({ sameObject: false, sharedPlayers: false, equal: true })
+
+      // The hook itself can't be replaced by page scripts.
+      const replaced = await page.evaluate(() => {
+        try {
+          ;(window as unknown as { __blacksite: unknown }).__blacksite = null
+        } catch {
+          // Throws in strict mode; ignored in sloppy mode. Either way it stays.
+        }
+        return typeof window.__blacksite?.snapshot === 'function'
+      })
+      expect(replaced).toBe(true)
+    }
+  } finally {
+    await a.context().close()
+    await b.context().close()
+  }
+})
+
 test('two tabs share the room and each sees the other move', async ({ browser }) => {
-  // Software WebGL plus a screenshot per reading: about 15 s locally.
   test.setTimeout(90_000)
   const a = await openPlayer(browser)
   const b = await openPlayer(browser)
   try {
-    // Both tabs joined the same room and each counts two players.
-    for (const page of [a, b]) {
-      await expect(page.locator('#hud')).toHaveText('Blacksite - online, 2 players', { timeout: WAIT_MS })
-      // Each tab draws its own (blue) box from server state.
-      await expect.poll(async () => (await boxes(page)).blue.n, { timeout: WAIT_MS }).toBeGreaterThan(0)
+    // Both tabs joined the same room and each knows both players.
+    const idA = await joined(a)
+    const idB = await joined(b)
+    expect(idA).not.toBe(idB)
+    const ids = [idA, idB]
+
+    // Both tabs agree on both positions.
+    const start = await settle(a, b, ids)
+    for (const id of ids) {
+      expect(same(get(start.a, id), get(start.b, id)), `${id} agrees across tabs`).toBe(true)
+    }
+    const b0 = get(start.b, idB)
+
+    // Hold D in tab A: A's x rises.
+    const a0 = get(start.a, idA)
+    await holdUntil(a, 'KeyD', "A's x rises in tab A", (s) => get(s, idA).x > a0.x + MOVE_UNITS)
+    const afterD = await settle(a, b, ids)
+    for (const s of [afterD.a, afterD.b]) {
+      expect(get(s, idA).x, `A's x rose in ${s.sessionId === idA ? 'tab A' : 'tab B'}`).toBeGreaterThan(
+        a0.x + MOVE_UNITS,
+      )
     }
 
-    // Phase 1: A walks sideways, away from B, so the two boxes are well apart
-    // on screen (they spawn within +-3 and may overlap at first).
-    const start = await boxes(a)
-    const w = Math.sqrt(start.blue.n) // rough box size on screen, in pixels
-    const right = !(start.orange.n > 0) || start.blue.x >= start.orange.x
-    await holdUntil(
-      a,
-      right ? 'KeyD' : 'KeyA',
-      `A's box moves ${right ? 'right' : 'left'}, clear of B's box`,
-      (v) =>
-        v.orange.n > 0 &&
-        Math.abs(v.blue.x - start.blue.x) > 2 * w &&
-        Math.abs(v.blue.x - v.orange.x) > 4 * w &&
-        (right ? v.blue.x > v.orange.x : v.blue.x < v.orange.x),
-    )
-    const before = await settle(a, b)
-    // Each tab draws both boxes, and B's box is in the same place in both.
-    expect(before.a.orange.n).toBeGreaterThan(0)
-    expect(before.b.blue.n).toBeGreaterThan(0)
-    expect(near(before.a.orange, before.b.blue, SAME_PX), "B's box matches across tabs").toBe(true)
+    // Hold W in tab A: A's z rises.
+    const a1 = get(afterD.a, idA)
+    await holdUntil(a, 'KeyW', "A's z rises in tab A", (s) => get(s, idA).z > a1.z + MOVE_UNITS)
+    const afterW = await settle(a, b, ids)
+    for (const s of [afterW.a, afterW.b]) {
+      expect(get(s, idA).z, `A's z rose in ${s.sessionId === idA ? 'tab A' : 'tab B'}`).toBeGreaterThan(
+        a1.z + MOVE_UNITS,
+      )
+    }
 
-    // Phase 2: hold W in tab A. +z is away from the camera, so A's box moves up
-    // the screen, in tab A and in tab B.
-    await holdUntil(a, 'KeyW', "A's box moves up the screen in tab A", (v) => v.blue.y < before.a.blue.y - 2 * w)
-    const after = await settle(a, b)
-    expect(after.a.blue.y, "A's box moved in tab A").toBeLessThan(before.a.blue.y - 2 * w)
-    expect(after.b.orange.y, "A's box moved in tab B").toBeLessThan(before.b.orange.y - 2 * w)
-    // settle() already checked that A's box is drawn at the same place in both tabs.
-
-    // B never pressed a key: its box has not moved in either tab.
-    expect(Math.abs(after.b.blue.x - before.b.blue.x), "B's box x in tab B").toBeLessThan(STILL_PX)
-    expect(Math.abs(after.b.blue.y - before.b.blue.y), "B's box y in tab B").toBeLessThan(STILL_PX)
-    expect(Math.abs(after.a.orange.x - before.a.orange.x), "B's box x in tab A").toBeLessThan(STILL_PX)
-    expect(Math.abs(after.a.orange.y - before.a.orange.y), "B's box y in tab A").toBeLessThan(STILL_PX)
+    // settle() checked that both tabs agree on both positions. B never
+    // pressed a key: it has not moved in either tab.
+    for (const s of [afterD.a, afterD.b, afterW.a, afterW.b]) {
+      expect(same(get(s, idB), b0), `B did not move (seen by ${s.sessionId})`).toBe(true)
+    }
 
     // Still exactly two players in each tab.
-    for (const page of [a, b]) {
-      await expect(page.locator('#hud')).toHaveText('Blacksite - online, 2 players')
+    for (const s of [afterW.a, afterW.b]) {
+      expect(s.connected).toBe(true)
+      expect(s.players).toHaveLength(2)
     }
   } finally {
     await a.context().close()
+    await b.context().close()
+  }
+})
+
+test('closing a tab drops the other tab to 1 player', async ({ browser }) => {
+  test.setTimeout(60_000)
+  const a = await openPlayer(browser)
+  const b = await openPlayer(browser)
+  try {
+    const idA = await joined(a)
+    const idB = await joined(b)
+    await a.context().close()
+    await expect
+      .poll(
+        async () => {
+          const s = await snap(b)
+          return s.players.map((p) => p.id).join(',')
+        },
+        { message: 'tab B sees only itself', timeout: WAIT_MS },
+      )
+      .toBe(idB)
+    expect(find(await snap(b), idA)).toBeUndefined()
+  } finally {
+    await a.context().close().catch(() => {})
     await b.context().close()
   }
 })

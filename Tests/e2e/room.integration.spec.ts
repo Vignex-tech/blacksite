@@ -2,7 +2,8 @@ import { expect, test } from '@playwright/test'
 import { Client, type Room } from '@colyseus/sdk'
 import { MOVE_MESSAGE, ROOM_NAME, type GameRoomState, type PlayerState } from '../../shared/protocol.js'
 // Built server constants (server/build exists: Playwright's webServer runs it).
-import { BOUND, SPAWN_SPREAD, SPEED } from '../../server/build/rooms/MyRoom.js'
+// Only constants #13 keeps exporting (no SPAWN_SPREAD: spawn rules change in #13).
+import { BOUND, SPEED } from '../../server/build/rooms/MyRoom.js'
 
 // Two real @colyseus/sdk clients (Node, no browser) against the production
 // server that Playwright's webServer starts. This project runs before the
@@ -66,7 +67,7 @@ test.afterEach(async () => {
   await Promise.all(open.splice(0).map((r) => (r.connection.isOpen ? r.leave().catch(() => {}) : undefined)))
 })
 
-test('two clients join the same room, each sees 2 players keyed by sessionId near spawn', async () => {
+test('two clients join the same room, each sees 2 players keyed by sessionId, spawned inside the bounds', async () => {
   const { a, b } = await joinPair()
   open.push(a, b)
   expect(a.roomId).toBe(b.roomId)
@@ -74,9 +75,12 @@ test('two clients join the same room, each sees 2 players keyed by sessionId nea
 
   for (const room of [a, b]) {
     for (const id of [a.sessionId, b.sessionId]) {
+      // Holds for the old spawn rule (+-SPAWN_SPREAD around the origin) and
+      // for #13's spawn areas; #15 tightens it to the spawn areas.
       const p = pos(room, id)
-      expect(Math.abs(p.x)).toBeLessThanOrEqual(SPAWN_SPREAD + EPS)
-      expect(Math.abs(p.z)).toBeLessThanOrEqual(SPAWN_SPREAD + EPS)
+      expect(Number.isFinite(p.x) && Number.isFinite(p.z)).toBe(true)
+      expect(Math.abs(p.x)).toBeLessThanOrEqual(BOUND + EPS)
+      expect(Math.abs(p.z)).toBeLessThanOrEqual(BOUND + EPS)
     }
   }
   // Both clients agree on both positions.
