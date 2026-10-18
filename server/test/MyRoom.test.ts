@@ -3,7 +3,10 @@ import { ColyseusTestServer, boot } from "@colyseus/testing";
 
 import appConfig from "../src/app.config.js";
 import { ROOM_NAME, MOVE_MESSAGE, GROUND_SIZE } from "../../shared/protocol.js";
-import { MyRoom, SPEED, BOUND, SPAWN_SPREAD, MOVE_RATE_HZ, MOVE_BURST } from "../src/rooms/MyRoom.js";
+import { GRAYBOX_MAP } from "../../shared/map.js";
+import { overlapsAny } from "../src/rules/collision.js";
+import { SOLIDS, FACE_EPS, assertClear, inRect } from "./mapHelpers.js";
+import { MyRoom, SPEED, BOUND, MOVE_RATE_HZ, MOVE_BURST } from "../src/rooms/MyRoom.js";
 
 const EPS = 1e-9;
 
@@ -38,13 +41,14 @@ describe("MyRoom", () => {
     assert.ok(BOUND > 0 && BOUND <= GROUND_SIZE / 2);
   });
 
-  it("adds a player per client keyed by sessionId, near the spawn", async () => {
+  it("adds a player per client keyed by sessionId, in a spawn area", async () => {
     const { room, a, b } = await setup();
 
     assert.strictEqual(room.state.players.size, 2);
-    for (const client of [a, b]) {
+    const { ghost, warden } = GRAYBOX_MAP.spawnAreas;
+    for (const [client, area] of [[a, ghost], [b, warden]] as const) {
       const p = pos(room, client.sessionId);
-      assert.ok(Math.abs(p.x) <= SPAWN_SPREAD && Math.abs(p.z) <= SPAWN_SPREAD);
+      assert.ok(p.x >= area.minX && p.x <= area.maxX && p.z >= area.minZ && p.z <= area.maxZ);
     }
 
     await room.waitForNextPatch();
@@ -204,5 +208,101 @@ describe("MyRoom", () => {
     assert.strictEqual(room.state.players.size, 1);
     assert.ok(room.state.players.has(b.sessionId));
     assert.ok(!room.state.players.has(a.sessionId));
+  });
+
+  describe("MyRoom map collision and spawns", () => {
+    /** One room and client with a manual clock; `move` advances it one rate step first. */
+    async function setup() {
+      const room = (await colyseus.createRoom<MyRoom>(ROOM_NAME, {})) as any;
+      const client = await colyseus.connectTo(room);
+      let t = room.now();
+      room.now = () => t;
+      const player = room.state.players.get(client.sessionId);
+      const move = async (dx: number, dz: number, times = 1) => {
+        for (let i = 0; i < times; i++) {
+          t += 1000 / MOVE_RATE_HZ;
+          client.send(MOVE_MESSAGE, { dx, dz });
+          await room.waitForNextMessage();
+        }
+      };
+      const place = (x: number, z: number) => { player.x = x; player.z = z; };
+      return { room, client, player, move, place };
+    }
+
+    it("spawns joiners alternately in the ghost and warden areas, clear of solids", async () => {
+      const room = await colyseus.createRoom<MyRoom>(ROOM_NAME, {});
+      const clients = [];
+      for (let i = 0; i < 4; i++) clients.push(await colyseus.connectTo(room));
+      const { ghost, warden } = GRAYBOX_MAP.spawnAreas;
+      clients.forEach((c, i) => {
+        const p = room.state.players.get(c.sessionId);
+        assert.ok(inRect(p, i % 2 === 0 ? ghost : warden), `joiner ${i} at (${p.x}, ${p.z})`);
+        assertClear(p, `joiner ${i}`);
+      });
+    });
+
+    it("stops a player walking into a wall at its face, never overlapping", async () => {
+      const { player, move, place } = await setup();
+      place(-5, -9); // south of wall-s-w (z -8..-7.5)
+      for (let i = 0; i < 15; i++) {
+        await move(0, 1);
+        assertClear(player, `step ${i}`);
+      }
+      assert.ok(Math.abs(player.z - -8.5) < FACE_EPS, `z ${player.z}`);
+      assert.strictEqual(player.x, -5);
+    });
+
+    it("slides along a wall when pushing into it diagonally", async () => {
+      const { player, move, place } = await setup();
+      place(-5, -8.5);
+      await move(1, 1, 10);
+      assert.ok(Math.abs(player.x - (-5 + 10 * SPEED)) < 1e-9, `x ${player.x}`);
+      assert.ok(Math.abs(player.z - -8.5) < FACE_EPS);
+    });
+
+    it("never passes through the thinnest walls at max input for many moves", async () => {
+      const { player, move, place } = await setup();
+      place(-10.5, 4); // west of wall-w-n (x -10..-9.5, 0.5 thick)
+      for (let i = 0; i < 20; i++) {
+        await move(1000, 0);
+        assertClear(player, `step ${i}`);
+      }
+      assert.ok(Math.abs(player.x - -10.5) < FACE_EPS);
+    });
+
+    it("holds in a corner and at the outer bound", async () => {
+      const { player, move, place } = await setup();
+      place(-8.5, -6.5);
+      await move(-1, -1, 10);
+      assert.ok(Math.abs(player.x - -9) < FACE_EPS && Math.abs(player.z - -7) < FACE_EPS);
+      place(BOUND - 0.15, BOUND - 0.15);
+      await move(1, 1, 4);
+      assert.deepStrictEqual({ x: player.x, z: player.z }, { x: BOUND, z: BOUND });
+    });
+
+    for (const entrance of GRAYBOX_MAP.entrances) {
+      it(`walks through ${entrance.id} in both directions`, async () => {
+        const { player, move, place } = await setup();
+        const d = 1.5;
+        // The doorway's walking axis is the one where both sides are clear.
+        const alongZ = !overlapsAny(entrance.x, entrance.z - d, SOLIDS) && !overlapsAny(entrance.x, entrance.z + d, SOLIDS);
+        const steps = Math.round((2 * d) / SPEED);
+        if (alongZ) {
+          place(entrance.x, entrance.z - d);
+          await move(0, 1, steps);
+          assert.ok(Math.abs(player.z - (entrance.z + d)) < 1e-9, `${entrance.id}: z ${player.z}`);
+          await move(0, -1, steps);
+          assert.ok(Math.abs(player.z - (entrance.z - d)) < 1e-9, `${entrance.id}: z ${player.z}`);
+          assert.strictEqual(player.x, entrance.x);
+        } else {
+          place(entrance.x - d, entrance.z);
+          await move(1, 0, steps);
+          assert.ok(Math.abs(player.x - (entrance.x + d)) < 1e-9, `${entrance.id}: x ${player.x}`);
+          await move(-1, 0, steps);
+          assert.ok(Math.abs(player.x - (entrance.x - d)) < 1e-9, `${entrance.id}: x ${player.x}`);
+          assert.strictEqual(player.z, entrance.z);
+        }
+      });
+    }
   });
 });
