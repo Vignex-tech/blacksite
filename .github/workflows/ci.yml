@@ -1,0 +1,75 @@
+name: CI
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-test:
+    name: build-and-test
+    runs-on: ubuntu-latest
+    env:
+      CI: true
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node 24
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: |
+            client/package-lock.json
+            server/package-lock.json
+            Tests/package-lock.json
+
+      - name: Client - install
+        working-directory: client
+        run: npm ci
+
+      - name: Client - build
+        working-directory: client
+        run: npm run build
+
+      - name: Server - install
+        working-directory: server
+        run: npm ci
+
+      - name: Server - build
+        working-directory: server
+        run: npm run build
+
+      - name: Server - test (Mocha)
+        working-directory: server
+        run: npm test
+
+      - name: Tests - install
+        working-directory: Tests
+        run: npm ci
+
+      - name: Tests - unit (Vitest)
+        working-directory: Tests
+        run: npm run test:unit
+
+      - name: Tests - install Playwright Chromium
+        working-directory: Tests
+        run: npx playwright install --with-deps chromium
+
+      - name: Tests - e2e (Playwright)
+        working-directory: Tests
+        run: npm run test:e2e
+
+      - name: Upload Playwright report
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: Tests/playwright-report
+          if-no-files-found: ignore
+          retention-days: 14
