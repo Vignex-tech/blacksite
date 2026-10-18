@@ -14,6 +14,7 @@ import { fileURLToPath } from "node:url";
  * Import your Room files
  */
 import { MyRoom } from "./rooms/MyRoom.js";
+import { ROOM_NAME } from "../../shared/protocol.js";
 
 /**
  * Built client (client/dist). Same relative path from src/ (tsx) and build/ (tsc).
@@ -26,7 +27,7 @@ const server = defineServer({
    * Define your room handlers:
    */
   rooms: {
-    my_room: defineRoom(MyRoom),
+    [ROOM_NAME]: defineRoom(MyRoom),
   },
 
   /**
