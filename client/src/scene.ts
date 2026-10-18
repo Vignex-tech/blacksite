@@ -8,15 +8,18 @@ import { StandardMaterial } from '@babylonjs/core/Materials/standardMaterial'
 import { Color3, Color4 } from '@babylonjs/core/Maths/math.color'
 import { Vector3 } from '@babylonjs/core/Maths/math.vector'
 import type { Mesh } from '@babylonjs/core/Meshes/mesh'
+import { GROUND_SIZE } from '../../shared/protocol.js'
 
-const GROUND_SIZE = 40
 const BOX_SIZE = 1
 
 export interface GameScene {
   engine: Engine
   scene: Scene
-  /** Create the player's box if needed, then move it to (x, z) on the ground. */
-  upsertPlayer(id: string, x: number, z: number): void
+  /**
+   * Create the player's box if needed, then move it to (x, z) on the ground.
+   * `isLocal` picks the local player's colour when the box is created.
+   */
+  upsertPlayer(id: string, x: number, z: number, isLocal?: boolean): void
   /** Remove the player's box. Does nothing if the id is unknown. */
   removePlayer(id: string): void
   dispose(): void
@@ -31,6 +34,8 @@ export function createGameScene(canvas: HTMLCanvasElement): GameScene {
   camera.lowerRadiusLimit = 8
   camera.upperRadiusLimit = 60
   camera.upperBetaLimit = Math.PI / 2.2
+  // Arrow keys move the player (see input.ts), so the camera keeps only mouse/touch input.
+  camera.inputs.removeByType('ArcRotateCameraKeyboardMoveInput')
   camera.attachControl(canvas, true)
 
   const light = new HemisphericLight('light', new Vector3(0, 1, 0), scene)
@@ -44,14 +49,17 @@ export function createGameScene(canvas: HTMLCanvasElement): GameScene {
 
   const playerMat = new StandardMaterial('playerMat', scene)
   playerMat.diffuseColor = new Color3(0.9, 0.45, 0.15)
+  const localPlayerMat = new StandardMaterial('localPlayerMat', scene)
+  localPlayerMat.diffuseColor = new Color3(0.2, 0.75, 0.95)
+  localPlayerMat.emissiveColor = new Color3(0.05, 0.2, 0.3)
 
   const players = new Map<string, Mesh>()
 
-  const upsertPlayer = (id: string, x: number, z: number): void => {
+  const upsertPlayer = (id: string, x: number, z: number, isLocal = false): void => {
     let box = players.get(id)
     if (!box) {
       box = CreateBox(`player-${id}`, { size: BOX_SIZE }, scene)
-      box.material = playerMat
+      box.material = isLocal ? localPlayerMat : playerMat
       box.position.y = BOX_SIZE / 2
       players.set(id, box)
     }

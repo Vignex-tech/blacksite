@@ -1,0 +1,6 @@
+{
+  "name": "blacksite-shared",
+  "private": true,
+  "description": "Client/server contract. No dependencies and no build step: protocol.js holds the runtime values, protocol.d.ts the types.",
+  "type": "module"
+}
