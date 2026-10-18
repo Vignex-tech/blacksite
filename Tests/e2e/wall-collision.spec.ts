@@ -6,12 +6,11 @@ import { TEAM_SPEED } from '../../shared/protocol.js'
 import { stepFor } from './support/movement.js'
 import { analyse, expectNoOverlap, pathClear, track } from './support/legs.js'
 import {
-  RAD_PER_PIXEL,
   closeTabs,
+  turnTo,
   joined as joinedTab,
   local,
   lockPointer,
-  moveMouse,
   openTab,
   pageNow,
   startSampler,
@@ -185,15 +184,13 @@ test('rotated: a ghost turned about 45 degrees walks into a wall and slides alon
     expect(run, 'the ghost spawned south of the wall').toBeGreaterThan(3)
     // Contact x along 45 degrees, kept where the box is well on the wall and can slide for a while.
     const contactX = Math.min(Math.max(me.x + run, wall.min.x + 1), wall.max.x - 2)
-    const pixels = Math.round(Math.atan2(contactX - me.x, run) / RAD_PER_PIXEL)
-    const yaw = pixels * RAD_PER_PIXEL
-    expect(yaw, 'a clearly rotated yaw').toBeGreaterThan(0.35)
-    expect(yaw).toBeLessThan(1.1)
-    expect(pathClear(me, yaw, run / Math.cos(yaw) - 0.1), `the path from ${me.x},${me.z} at yaw ${yaw} is clear up to the wall`).toBe(true)
+    const aim = Math.atan2(contactX - me.x, run)
+    expect(aim, 'a clearly rotated yaw').toBeGreaterThan(0.35)
+    expect(aim).toBeLessThan(1.1)
 
     await lockPointer(a)
-    await moveMouse(a, pixels)
-    expect(angleDiff((await snap(a.page)).camera!.yaw, yaw)).toBeLessThan(1e-6)
+    const yaw = await turnTo(a, aim)
+    expect(pathClear(me, yaw, run / Math.cos(yaw) - 0.1), `the path from ${me.x},${me.z} at yaw ${yaw} is clear up to the wall`).toBe(true)
     for (const t of [a, b]) {
       await expect
         .poll(async () => angleDiff(get(await snap(t.page), me.id).yaw, yaw), { message: `${t.name} sees the ghost turn`, timeout: WAIT_MS })

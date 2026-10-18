@@ -111,6 +111,38 @@ export async function moveMouse(tab: Tab, pixels: number): Promise<number> {
   return pixels * RAD_PER_PIXEL
 }
 
+/**
+ * Turns the camera to `target` (radians) with real mouse movement under
+ * pointer lock, closed loop: move, read camera.yaw from the hook, correct.
+ * Needed because synthetic mouse events in headless Chromium on Linux (CI)
+ * don't always report movementX as moved: the first event after the lock
+ * can carry the cursor's whole offset and later ones come out about doubled
+ * (on Windows they match 0.0025 rad per pixel exactly). The rate per pixel
+ * itself is unit-tested in unit/cameras.test.ts. Returns the reached yaw,
+ * which is within `tol` of the target.
+ */
+export async function turnTo(tab: Tab, target: number, tol = 0.003): Promise<number> {
+  const camYaw = async () => (await snap(tab.page)).camera!.yaw
+  const wrap = (a: number) => Math.atan2(Math.sin(a), Math.cos(a))
+  // Absorb a bogus first event after the lock with a tiny move.
+  await moveMouse(tab, 1)
+  let yaw = await camYaw()
+  let gain = 1 // observed radians per (pixel * RAD_PER_PIXEL)
+  for (let i = 0; i < 12; i++) {
+    const err = wrap(target - yaw)
+    if (Math.abs(err) < tol) return yaw
+    const pixels = Math.round(err / (RAD_PER_PIXEL * gain))
+    if (pixels === 0) return yaw
+    await moveMouse(tab, pixels)
+    const next = await camYaw()
+    const seen = wrap(next - yaw) / (pixels * RAD_PER_PIXEL)
+    // Only trust a clean reading in the right direction.
+    if (seen > 0.25 && seen < 4) gain = seen
+    yaw = next
+  }
+  throw new Error(`${tab.name}: camera did not turn to ${target} (at ${yaw})`)
+}
+
 /** Per-sample local and watched player positions recorded inside the page. */
 export interface Sample {
   t: number

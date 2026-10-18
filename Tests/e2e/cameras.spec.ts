@@ -8,9 +8,9 @@ import { analyse, expectNeverFasterThanLimit, expectNoOverlap, pathClear, track 
 import {
   EPS,
   MODE_FOR_TEAM,
-  RAD_PER_PIXEL,
   WAIT_MS,
   closeTabs,
+  turnTo,
   get,
   holdKey,
   joined,
@@ -152,7 +152,6 @@ async function turnAndWalk(tab: Tab, other: Tab): Promise<{ speed: number; perMo
     )
   })
   expect(turn, `${tab.name}: one of the planned turns has a clear path from ${me.x},${me.z}`).toBeDefined()
-  const pixels = Math.round(turn! / RAD_PER_PIXEL)
 
   // Before pointer lock, the mouse doesn't turn the camera or send anything.
   const tIdle = Date.now()
@@ -166,10 +165,10 @@ async function turnAndWalk(tab: Tab, other: Tab): Promise<{ speed: number; perMo
   await lockPointer(tab)
   await expect(tab.page.locator('#camera-hint'), `${tab.name}: the hint is hidden while locked`).toHaveText('')
   const tTurn = Date.now()
-  const turned = await moveMouse(tab, pixels)
+  const wantYaw = Math.atan2(Math.sin(camYaw0 + turn!), Math.cos(camYaw0 + turn!))
+  await turnTo(tab, wantYaw)
   const cam = (await snap(tab.page)).camera!
-  const wantYaw = Math.atan2(Math.sin(camYaw0 + turned), Math.cos(camYaw0 + turned))
-  expect(angleDiff(cam.yaw, wantYaw), `${tab.name}: camera yaw turned by ${pixels} px * ${RAD_PER_PIXEL} at once`).toBeLessThan(1e-6)
+  expect(angleDiff(cam.yaw, wantYaw), `${tab.name}: the mouse turned the camera to ${wantYaw} (at ${cam.yaw})`).toBeLessThan(0.003)
   expect(cam.mode).toBe(MODE_FOR_TEAM[team])
 
   // The server yaw follows (yaw-only moves), within the client's send threshold, in both tabs.
@@ -337,7 +336,7 @@ test('a disconnect returns the camera to overhead at yaw 0 and releases the poin
     expect(s.camera).toEqual({ mode: MODE_FOR_TEAM[team], yaw: 0 })
     await lockPointer(tab)
     await moveMouse(tab, 200)
-    expect(angleDiff((await snap(tab.page)).camera!.yaw, 200 * RAD_PER_PIXEL)).toBeLessThan(1e-6)
+    expect(angleDiff((await snap(tab.page)).camera!.yaw, 0), 'the mouse turned the camera').toBeGreaterThan(0.2)
 
     // Network loss: the browser drops the room socket.
     await tab.page.context().setOffline(true)
