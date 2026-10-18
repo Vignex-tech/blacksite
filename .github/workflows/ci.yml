@@ -67,6 +67,17 @@ jobs:
         working-directory: Tests
         run: npm run test:e2e
 
+      # Screenshot of the rendered graybox map (e2e/map.spec.ts), for a human to
+      # look at. Uploaded on every run; no test compares its pixels.
+      - name: Upload map screenshot
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: graybox-map-screenshot
+          path: Tests/Reports/
+          if-no-files-found: warn
+          retention-days: 30
+
       - name: Upload Playwright report
         if: failure()
         uses: actions/upload-artifact@v4
