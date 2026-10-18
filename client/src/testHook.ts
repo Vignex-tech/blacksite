@@ -19,6 +19,8 @@ export interface TestHookRecorder {
   wrapView(view: PlayerView): PlayerView
   setConnected(sessionId: string): void
   setDisconnected(): void
+  /** Records the rendered map (id and number of solid meshes created). */
+  setMap(id: string, renderedSolids: number): void
 }
 
 interface PlayerRecord {
@@ -31,6 +33,8 @@ export function installTestHook(target: Window = window): TestHookRecorder {
   const players = new Map<string, PlayerRecord>()
   let connected = false
   let sessionId: string | null = null
+  let mapId: string | null = null
+  let renderedSolids = 0
 
   const hook: BlacksiteTestHook = Object.freeze({
     snapshot(): BlacksiteSnapshot {
@@ -41,7 +45,7 @@ export function installTestHook(target: Window = window): TestHookRecorder {
         players: [...players.entries()]
           .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
           .map(([id, p]) => ({ id, x: p.x, z: p.z, isLocal: p.isLocal })),
-        map: { id: null, renderedSolids: 0 },
+        map: { id: mapId, renderedSolids },
       }
     },
   })
@@ -73,6 +77,10 @@ export function installTestHook(target: Window = window): TestHookRecorder {
       connected = false
       sessionId = null
       players.clear()
+    },
+    setMap(id, count) {
+      mapId = id
+      renderedSolids = count
     },
   }
 }

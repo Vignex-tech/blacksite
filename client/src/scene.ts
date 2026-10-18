@@ -2,19 +2,23 @@ import { Engine } from '@babylonjs/core/Engines/engine'
 import { Scene } from '@babylonjs/core/scene'
 import { ArcRotateCamera } from '@babylonjs/core/Cameras/arcRotateCamera'
 import { HemisphericLight } from '@babylonjs/core/Lights/hemisphericLight'
-import { CreateGround } from '@babylonjs/core/Meshes/Builders/groundBuilder'
 import { CreateBox } from '@babylonjs/core/Meshes/Builders/boxBuilder'
 import { StandardMaterial } from '@babylonjs/core/Materials/standardMaterial'
 import { Color3, Color4 } from '@babylonjs/core/Maths/math.color'
 import { Vector3 } from '@babylonjs/core/Maths/math.vector'
 import type { Mesh } from '@babylonjs/core/Meshes/mesh'
-import { GROUND_SIZE } from '../../shared/protocol.js'
+import { buildMap, type RenderedMap } from './map.ts'
 
 const BOX_SIZE = 1
+/** Camera tilt from straight down (radians) and distance from the map centre. */
+const CAMERA_BETA = 0.4
+const CAMERA_RADIUS = 56
 
 export interface GameScene {
   engine: Engine
   scene: Scene
+  /** The map built from shared data (id and number of solid meshes). */
+  map: RenderedMap
   /**
    * Create the player's box if needed, then move it to (x, z) on the ground.
    * `isLocal` picks the local player's colour when the box is created.
@@ -30,7 +34,10 @@ export function createGameScene(canvas: HTMLCanvasElement): GameScene {
   const scene = new Scene(engine)
   scene.clearColor = new Color4(0.05, 0.06, 0.08, 1)
 
-  const camera = new ArcRotateCamera('camera', -Math.PI / 2, Math.PI / 3, 30, Vector3.Zero(), scene)
+  // Mostly top-down so players stay visible over the 3-unit walls, both in the
+  // south yard and inside the building; far enough out to frame the whole map.
+  // Viewed from the south: +z is away from the camera, +x to its right.
+  const camera = new ArcRotateCamera('camera', -Math.PI / 2, CAMERA_BETA, CAMERA_RADIUS, Vector3.Zero(), scene)
   camera.lowerRadiusLimit = 8
   camera.upperRadiusLimit = 60
   camera.upperBetaLimit = Math.PI / 2.2
@@ -41,17 +48,15 @@ export function createGameScene(canvas: HTMLCanvasElement): GameScene {
   const light = new HemisphericLight('light', new Vector3(0, 1, 0), scene)
   light.intensity = 0.9
 
-  const ground = CreateGround('ground', { width: GROUND_SIZE, height: GROUND_SIZE }, scene)
-  const groundMat = new StandardMaterial('groundMat', scene)
-  groundMat.diffuseColor = new Color3(0.25, 0.28, 0.3)
-  groundMat.specularColor = Color3.Black()
-  ground.material = groundMat
+  const map = buildMap(scene)
 
   const playerMat = new StandardMaterial('playerMat', scene)
   playerMat.diffuseColor = new Color3(0.9, 0.45, 0.15)
+  playerMat.specularColor = Color3.Black() // no white glare on top faces seen from above
   const localPlayerMat = new StandardMaterial('localPlayerMat', scene)
   localPlayerMat.diffuseColor = new Color3(0.2, 0.75, 0.95)
   localPlayerMat.emissiveColor = new Color3(0.05, 0.2, 0.3)
+  localPlayerMat.specularColor = Color3.Black()
 
   const players = new Map<string, Mesh>()
 
@@ -82,6 +87,7 @@ export function createGameScene(canvas: HTMLCanvasElement): GameScene {
   return {
     engine,
     scene,
+    map,
     upsertPlayer,
     removePlayer,
     dispose: () => {

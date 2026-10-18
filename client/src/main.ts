@@ -37,7 +37,10 @@ try {
   console.warn('Babylon engine failed to start:', err)
 }
 
-if (game) start(game)
+if (game) {
+  testHook.setMap(game.map.id, game.map.renderedSolids)
+  start(game)
+}
 
 function start(view: GameScene): void {
   const input = new MovementInput()
