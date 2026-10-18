@@ -1,15 +1,21 @@
 import { Room, Client, CloseCode } from "colyseus";
 import {
+  ACTION_MESSAGE,
   GROUND_SIZE,
+  JUMP_SPEED,
   MAX_TEAM_SIZE,
   MOVE_MESSAGE,
+  STEP_HEIGHT,
   TEAMS,
   TEAM_SPEED,
+  type MovementMode,
   type Team,
 } from "../../../shared/protocol.js";
 import { GRAYBOX_MAP, PLAYER_HALF_SIZE } from "../../../shared/map.js";
 import { MyRoomState, Player } from "./schema/MyRoomState.js";
-import { groundSolids, resolveMove } from "../rules/collision.js";
+import { groundSolids } from "../rules/collision.js";
+import { moveBody, startJump, stepFall, supportHeight, type Body, type World } from "../rules/vertical.js";
+import { parseAction } from "../rules/actions.js";
 import { randomSpawnPoint } from "../rules/spawn.js";
 import { assignTeam } from "../rules/teams.js";
 import { parseMove, worldStep } from "../rules/movement.js";
@@ -18,6 +24,8 @@ import { parseMove, worldStep } from "../rules/movement.js";
 export { PLAYER_HALF_SIZE };
 /** Move validation lives in rules/movement.ts; re-exported for existing imports. */
 export { parseMove };
+/** Action validation lives in rules/actions.ts. */
+export { parseAction };
 
 /**
  * Intended move-message rate (Hz). Each team's max sustained speed is
@@ -55,20 +63,51 @@ export const MAX_CLIENTS = TEAMS.length * MAX_TEAM_SIZE;
 /** Yaw every player spawns with (facing +z). */
 export const SPAWN_YAW = 0;
 
+/** Fixed server simulation rate (Hz): gravity, falls and landings run at this step. */
+export const SIM_RATE_HZ = 20;
+
+/** Action budget refill rate (actions per second), server-side only. */
+export const ACTION_RATE_HZ = 5;
+
+/** Action budget capacity: at most this many actions back to back. */
+export const ACTION_BURST = 2;
+
 /** The map this room plays on. */
 const MAP = GRAYBOX_MAP;
 
-/** Solids that block ground-floor movement (y range overlaps the player's height). */
+/** Solids that block ground-floor movement (used to pick clear spawn points). */
 const SOLIDS = groundSolids(MAP.solids);
+
+/** The map geometry for height-aware movement (rules/vertical.ts). */
+const WORLD: World = { solids: MAP.solids, floors: MAP.floors, ramps: MAP.ramps, bounds: MAP.bounds };
+
+/** Length of one simulation step, in ms and in seconds. */
+const SIM_STEP_MS = 1000 / SIM_RATE_HZ;
+const SIM_STEP_S = 1 / SIM_RATE_HZ;
 
 function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value));
 }
 
-/** Per-client token bucket: `tokens` moves available, last refilled at `at` (ms). */
-interface MoveBudget {
+/** Per-client token bucket: `tokens` available, last refilled at `at` (ms). */
+interface Budget {
   tokens: number;
   at: number;
+}
+
+/**
+ * Refills a token bucket for the time elapsed since its last refill (at
+ * `rateHz` tokens per second, up to `burst`) and spends one token if
+ * available. Returns false if the bucket is empty.
+ */
+function spend(budget: Budget | undefined, now: number, rateHz: number, burst: number): boolean {
+  if (!budget) return false;
+  const elapsed = Math.max(0, now - budget.at);
+  budget.tokens = Math.min(burst, budget.tokens + (elapsed / 1000) * rateHz);
+  budget.at = now;
+  if (budget.tokens < 1) return false;
+  budget.tokens -= 1;
+  return true;
 }
 
 export class MyRoom extends Room<{ state: MyRoomState }> {
@@ -76,25 +115,84 @@ export class MyRoom extends Room<{ state: MyRoomState }> {
   state = new MyRoomState();
 
   /** Server-only movement budgets by sessionId; never synchronized. */
-  private moveBudgets = new Map<string, MoveBudget>();
+  private moveBudgets = new Map<string, Budget>();
+
+  /** Server-only action budgets by sessionId; never synchronized. */
+  private actionBudgets = new Map<string, Budget>();
+
+  /** Server-only vertical speeds (u/s, +up) by sessionId; never synchronized. */
+  private verticalSpeeds = new Map<string, number>();
+
+  /** Simulated time not yet consumed by a whole step (ms). */
+  private simAccumulator = 0;
 
   /** Server time in ms. Tests replace this to control time. */
   now: () => number = () => performance.now();
 
   /**
-   * Refills the client's budget for the time elapsed since the last refill and
-   * spends one move if available. Returns false if the client is over budget.
+   * When true (the default) the room's simulation interval drives
+   * `simulate()` in real time. Tests set it to false and call `simulate()`
+   * themselves, so falls and jumps run on a controlled clock.
    */
+  autoSimulate = true;
+
   private spendMove(sessionId: string): boolean {
-    const now = this.now();
-    const budget = this.moveBudgets.get(sessionId);
-    if (!budget) return false;
-    const elapsed = Math.max(0, now - budget.at);
-    budget.tokens = Math.min(MOVE_BURST, budget.tokens + (elapsed / 1000) * MOVE_RATE_HZ);
-    budget.at = now;
-    if (budget.tokens < 1) return false;
-    budget.tokens -= 1;
-    return true;
+    return spend(this.moveBudgets.get(sessionId), this.now(), MOVE_RATE_HZ, MOVE_BURST);
+  }
+
+  private spendAction(sessionId: string): boolean {
+    return spend(this.actionBudgets.get(sessionId), this.now(), ACTION_RATE_HZ, ACTION_BURST);
+  }
+
+  /** The player's movement state as a Body for rules/vertical.ts. */
+  private bodyOf(sessionId: string, player: Player): Body {
+    return {
+      x: player.x,
+      y: player.y,
+      z: player.z,
+      mode: player.mode as MovementMode,
+      vy: this.verticalSpeeds.get(sessionId) ?? 0,
+    };
+  }
+
+  /** Writes a Body back. Only changed fields are assigned, so a no-op sends no patch. */
+  private storeBody(sessionId: string, player: Player, body: Body) {
+    if (player.x !== body.x) player.x = body.x;
+    if (player.y !== body.y) player.y = body.y;
+    if (player.z !== body.z) player.z = body.z;
+    if (player.mode !== body.mode) player.mode = body.mode;
+    this.verticalSpeeds.set(sessionId, body.vy);
+  }
+
+  /**
+   * Advances the simulation by `dtMs` of server time, in fixed steps of
+   * 1000 / SIM_RATE_HZ ms; a remainder carries over to the next call. Each
+   * step applies gravity to falling players and lands them. Grounded players
+   * are never touched.
+   */
+  simulate(dtMs: number) {
+    if (!Number.isFinite(dtMs) || dtMs <= 0) return;
+    this.simAccumulator += dtMs;
+    while (this.simAccumulator >= SIM_STEP_MS) {
+      this.simAccumulator -= SIM_STEP_MS;
+      this.step();
+    }
+  }
+
+  /** One fixed simulation step. */
+  private step() {
+    this.state.players.forEach((player, sessionId) => {
+      if (player.mode !== "falling") return;
+      const body = this.bodyOf(sessionId, player);
+      stepFall(WORLD, body, SIM_STEP_S);
+      this.storeBody(sessionId, player, body);
+    });
+  }
+
+  onCreate() {
+    this.setSimulationInterval((dt) => {
+      if (this.autoSimulate) this.simulate(dt);
+    }, SIM_STEP_MS);
   }
 
   messages = {
@@ -110,12 +208,32 @@ export class MyRoom extends Room<{ state: MyRoomState }> {
       if (move.yaw !== undefined) player.yaw = move.yaw;
       if (move.dx === 0 && move.dz === 0) return;
 
+      // Same team step on the ground and in the air (no extra air speed).
       const step = worldStep(move.dx, move.dz, player.yaw, TEAM_STEP[player.team as Team]);
-      // Collide with the map's solids (x, then z, so walls can be slid along)
-      // and keep the box on the ground (centre within -BOUND..BOUND).
-      const next = resolveMove(player, step.x, step.z, SOLIDS, MAP.bounds);
-      player.x = clamp(next.x, -BOUND, BOUND);
-      player.z = clamp(next.z, -BOUND, BOUND);
+      // Height-aware and swept (x, then z, so walls can be slid along); the
+      // box stays inside the ground (centre within -BOUND..BOUND).
+      const body = this.bodyOf(client.sessionId, player);
+      moveBody(WORLD, body, step.x, step.z);
+      body.x = clamp(body.x, -BOUND, BOUND);
+      body.z = clamp(body.z, -BOUND, BOUND);
+      this.storeBody(client.sessionId, player, body);
+    },
+
+    [ACTION_MESSAGE]: (client: Client, message: unknown) => {
+      const player = this.state.players.get(client.sessionId);
+      if (!player) return;
+
+      const action = parseAction(message);
+      if (!action) return;
+      // Over budget: ignore. Refused actions still spend a token.
+      if (!this.spendAction(client.sessionId)) return;
+
+      if (action === "jump") {
+        // Only from the ground, and only for teams that can jump (not Wardens).
+        const body = this.bodyOf(client.sessionId, player);
+        if (startJump(body, JUMP_SPEED[player.team as Team])) this.storeBody(client.sessionId, player, body);
+      }
+      // 'climb' and 'drop' are accepted and change nothing until #31.
     },
   };
 
@@ -130,14 +248,21 @@ export class MyRoom extends Room<{ state: MyRoomState }> {
     const spawn = randomSpawnPoint(MAP.spawnAreas[team], SOLIDS);
     player.x = spawn.x;
     player.z = spawn.z;
+    // Standing on the surface under the spawn point (the ground today).
+    player.y = supportHeight(WORLD, spawn.x, spawn.z, STEP_HEIGHT);
+    player.mode = "ground";
     this.state.players.set(client.sessionId, player);
     this.moveBudgets.set(client.sessionId, { tokens: MOVE_BURST, at: this.now() });
+    this.actionBudgets.set(client.sessionId, { tokens: ACTION_BURST, at: this.now() });
+    this.verticalSpeeds.set(client.sessionId, 0);
     console.log(client.sessionId, "joined as", team);
   }
 
   onLeave(client: Client, code: CloseCode) {
     this.state.players.delete(client.sessionId);
     this.moveBudgets.delete(client.sessionId);
+    this.actionBudgets.delete(client.sessionId);
+    this.verticalSpeeds.delete(client.sessionId);
     console.log(client.sessionId, "left!", code);
   }
 
