@@ -5,7 +5,7 @@ Last updated 2026-10-19 by the director, on the owner's Windows PC (8 GB RAM). R
 ## State
 - Repo: `Vignex-tech/blacksite` (private), branch `main`. Milestones #1, #9 (M2) and #17 (M3) are done; the last green CI commit is `5c10c44`.
 - CI: `.github/workflows/ci.yml` (job `build-and-test`) builds the client and server, then runs Mocha (server), Vitest (`Tests/unit`) and Playwright (`Tests/e2e`). **Nothing counts as done until CI passes** (see `CLAUDE.md`).
-- Next: milestone 4 (vertical movement and climbing, see `Docs/phase1-plan.md`). **No M4 issues are filed yet; the owner decides when and how.** Known follow-ups from M3 are in `Docs/backlog.md`.
+- Next: milestone 4 (vertical movement and climbing, tracking #26, **planned**). Issues #27 to #36 are filed; run them one at a time in the order on #26 and in `Docs/phase1-plan.md`. Known follow-ups from M3 are in `Docs/backlog.md`.
 
 ### Shared contract (`shared/`)
 - Plain ESM `.js` runtime files with `.d.ts` types, and `shared/package.json` (`"type": "module"`). The client imports `../../shared/<file>.js` and the server `../../../shared/<file>.js` (from `server/src/rooms/` or `server/src/rules/`).
@@ -83,6 +83,21 @@ All issues closed with green CI; the last green commit is `5c10c44`.
 | 24 | Client: Ghost third-person and Warden first-person cameras, camera-relative input | gameplay-engineer | done (1c196e8) |
 | 25 | QA: M3 gate, per-team cameras, camera-relative moves, per-team speed | qa-build | done (e63260b, 225756d, a959f86, 5c10c44) |
 
+## Milestone 4: vertical movement and climbing (tracking #26, planned)
+Filed on 2026-10-19; nothing has started yet. Defaults the owner may change are listed on #26 under "Decisions for the owner".
+| Order | # | Issue | Agent | Depends on | Status |
+|---|---|---|---|---|---|
+| 1 | 27 | Shared contract: height, movement modes, actions, upper level and traversal anchors | gameplay-engineer | none | planned |
+| 2 | 28 | QA: make existing tests ready for height, floors, ramps and anchors | qa-build | #27 | planned |
+| 3 | 29 | Server: gravity, floors, ramps, Ghost jump and y-aware collision | server-engineer | #27, #28 | planned |
+| 4 | 30 | QA: verify server stairs, floors, falling, jumps and action validation | qa-build | #29 | planned |
+| 5 | 31 | Server: climb and ledge-hang state machine, Ghosts only, at authored anchors | server-engineer | #27, #29, #30 | planned |
+| 6 | 32 | QA: verify climbing, hanging, drop, forged climbs and Warden refusal | qa-build | #31 | planned |
+| 7 | 33 | Client: render upper level, stairs and anchors; players at height; y and mode in test hook | gameplay-engineer | #29, #31, #32 | planned |
+| 8 | 34 | QA: verify upper-level rendering and player height in both tabs | qa-build | #33 | planned |
+| 9 | 35 | Client: jump, climb and drop key bindings, mode feedback in the HUD | gameplay-engineer | #33, #34 | planned |
+| 10 | 36 | QA: M4 gate, Ghost climbs via anchors, hangs and drops; Warden takes stairs and is refused | qa-build | #35 | planned |
+
 ## Decisions and open questions
 - Agents (`.claude/agents/`): director, gameplay-engineer, server-engineer, qa-build. Each edits only its own folders. The main session dispatches issues from the director's hand-off table, because subagents can't start other subagents.
 - **Decided:** map data lives in `shared/` (owned by gameplay-engineer) so the server can use it for collision and validation; collision, spawn, team and movement code lives in `server/src/rules/`. No level-builder agent for now (see `Docs/phase1-plan.md`).
@@ -90,7 +105,7 @@ All issues closed with green CI; the last green commit is `5c10c44`.
 - **Decided by the owner on #9 (hidden information, rule 2):** every client receives every player's position until M5. In M5 the server adds a line-of-sight filter, reusing the weapon raycast, so Warden clients stop receiving Ghost positions they couldn't see. Test matches before M5 are not cheat-proof.
 - **Decided by the owner on #9:** #16 could edit `.github/workflows/ci.yml` to upload the map screenshot artifact (done).
 - **In place since M3, owner may still change:** Ghost 2.4 and Warden 2.0 units/s (`TEAM_SPEED`, one place in `shared/protocol.js`); teams balanced on join with ties going to ghost; no rebalancing when someone leaves; clients can't choose a team; everyone spawns facing +z.
-- **Open:** Milestone 4 issues are not filed; the owner decides.
+- **Open, with proposed defaults (M4, see #26):** gravity, Ghost jump height, whether Wardens can jump (default: no), climb and shimmy speed, anchor range, the number and placement of anchors, railings (default: none), fall damage (default: none until M5), and the jump, climb and drop keys. Work goes ahead with the defaults; each is one constant.
 - `CLAUDE.md` holds the game brief and the rules every agent follows. The detailed original brief is the owner's master prompt, kept outside the repo.
 - Env files: `.env` and `.env.*` are git-ignored; only `server/.env.example` is committed.
 - Blender is deferred until the art phase, to save RAM.

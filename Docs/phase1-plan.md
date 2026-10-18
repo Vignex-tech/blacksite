@@ -24,11 +24,30 @@ Milestones #1 (two tabs join one room and see each other move), #9 (graybox map,
 - **Gate:** in two tabs, one player is a Ghost in third person and one is a Warden in first person; moves follow the camera; the server enforces each team's speed; leaving and rejoining keeps teams balanced. Tests use the hook and SDK clients only.
 - **Not in M3:** hidden-information filtering (M5, decided on #9), climbing, weapons, terminals.
 
-### Milestone 4: vertical movement and climbing
+### Milestone 4: vertical movement and climbing (tracking issue #26, planned)
 - **Goal:** the Ghost climbs and hangs from ledges on authored anchors only; the Warden reaches the upper level by stairs and cannot climb.
 - **Order:** `shared/` first: `y` and a movement mode (ground, falling, climbing, ledge hang) in player state; input messages for jump, climb and drop; the map gains one upper service level, stairs or ramps, one overhead traversal route and traversal anchors (rule 5). Then server: gravity, floors at different heights, walking on ramps, the climb and ledge-hang state machine, which is only allowed for Ghosts and only at an anchor in range, plus anchor validation. Then client: render the upper level and anchors, input bindings, simple state feedback (no animation yet).
-- **Agents:** gameplay-engineer, server-engineer, qa-build.
+- **Contract (#27):** `MOVEMENT_MODES` (`ground`, `falling`, `climbing`, `hanging`); `y` and `mode` in `PlayerState` (optional until #33); `ACTION_MESSAGE` `'action'` with `{ action: 'jump' | 'climb' | 'drop' }`, which carries no anchor id or position (the server picks the anchor from the player's own position). Vertical constants in `shared/protocol.js`: `GRAVITY`, `MAX_FALL_SPEED`, `JUMP_SPEED` per team, `STEP_HEIGHT`, `CLIMB_SPEED`, `SHIMMY_SPEED`, `ANCHOR_RANGE`, `ANCHOR_REACH` and `CAN_CLIMB`. The map gains `UPPER_LEVEL_Y` and the new lists `floors`, `ramps` and `anchors` (climb and ledge). `solids` is unchanged, so no behaviour changes until the server reads the new lists.
+- **Keeping CI green:** qa-build first makes the existing tests height-aware (#28): a y-aware overlap watch, map invariants limited to the ground band, routes that avoid ramps and anchors, and new invariant and reachability tests for the new map data. Each later change then lands with tests that already accept it, and each server or client issue is followed by a qa-build issue.
+- **Run order (one agent at a time):**
+
+  | Order | # | Issue | Agent | Depends on |
+  |---|---|---|---|---|
+  | 1 | #27 | Shared contract: height, movement modes, actions, upper level and traversal anchors | gameplay-engineer | none |
+  | 2 | #28 | QA: make existing tests ready for height, floors, ramps and anchors | qa-build | #27 |
+  | 3 | #29 | Server: gravity, floors, ramps, Ghost jump and y-aware collision | server-engineer | #27, #28 |
+  | 4 | #30 | QA: verify server stairs, floors, falling, jumps and action validation | qa-build | #29 |
+  | 5 | #31 | Server: climb and ledge-hang state machine, Ghosts only, at authored anchors | server-engineer | #27, #29, #30 |
+  | 6 | #32 | QA: verify climbing, hanging, drop, forged climbs and Warden refusal | qa-build | #31 |
+  | 7 | #33 | Client: render upper level, stairs and anchors; players at height; y and mode in test hook | gameplay-engineer | #29, #31, #32 |
+  | 8 | #34 | QA: verify upper-level rendering and player height in both tabs | qa-build | #33 |
+  | 9 | #35 | Client: jump, climb and drop key bindings, mode feedback in the HUD | gameplay-engineer | #33, #34 |
+  | 10 | #36 | QA: M4 gate, Ghost climbs via anchors, hangs and drops; Warden takes stairs and is refused | qa-build | #35 |
+
+- **Proposed defaults (the owner can change them; each is one constant):** gravity 20 u/s^2 and max fall speed 20; Ghost jump speed 4.5 (apex about 0.5); Wardens can't jump; step height 0.35; climb speed 1.5 and shimmy speed 1.0 u/s; anchor range 0.8 and ledge reach 0.6; upper level at y 3; no railings; no fall damage (there is no health until M5); action rate limit 5 per second with a burst of 2; keys Space (jump), E (climb, grab, mantle) and C (drop). The full list is on #26.
+- **Agents:** gameplay-engineer (#27, #33, #35), server-engineer (#29, #31), qa-build (#28, #30, #32, #34, #36).
 - **Gate:** a Ghost reaches the upper level only through anchors and can hang from a ledge and drop; a Warden reaches it only by stairs and is refused when trying to climb; a forged climb message far from an anchor is rejected.
+- **Not in M4:** animation, ceiling hanging and Shadow Drop (Phase 2), fall damage (M5), camera collision (backlog).
 
 ### Milestone 5: weapons and damage
 - **Goal:** players can shoot and be hurt and eliminated, with every hit decided by the server.
