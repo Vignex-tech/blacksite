@@ -6,11 +6,19 @@ import {
   createRouter,
   createEndpoint,
 } from "colyseus";
+import express from "express";
+import { existsSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 
 /**
  * Import your Room files
  */
 import { MyRoom } from "./rooms/MyRoom.js";
+
+/**
+ * Built client (client/dist). Same relative path from src/ (tsx) and build/ (tsc).
+ */
+const clientDist = fileURLToPath(new URL("../../client/dist", import.meta.url));
 
 const server = defineServer({
 
@@ -58,7 +66,17 @@ const server = defineServer({
      * (It is not recommended to expose this route in a production environment)
      */
     if (process.env.NODE_ENV !== "production") {
-      app.use("/", playground());
+      app.use("/playground", playground());
+    }
+
+    /**
+     * Serve the built client, so the game and the server share one port.
+     * Run `npm run build` in client/ first.
+     */
+    if (existsSync(clientDist)) {
+      app.use(express.static(clientDist));
+    } else {
+      console.warn(`client build not found at ${clientDist}; run "npm run build" in client/`);
     }
   }
 });
