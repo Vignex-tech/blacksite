@@ -6,7 +6,8 @@ import { GRAYBOX_MAP } from '../../shared/map.js'
 import type { BlacksiteSnapshot } from '../../shared/testhook.js'
 
 // #16: each tab renders the graybox map from shared/map.js (#14). The check is
-// the test hook's map report, not pixels. The screenshot is saved for a human
+// the test hook's map report, not pixels. Since #25 there are three
+// screenshots (overhead map, ghost view, warden view). They are saved for a human
 // to look at (CI uploads Tests/Reports/ as the "graybox-map-screenshot"
 // artifact on every run); nothing compares it, because GPU rendering differs
 // between machines. Mesh names, sizes and colours are unit-tested on
@@ -14,7 +15,12 @@ import type { BlacksiteSnapshot } from '../../shared/testhook.js'
 
 const VIEWPORT = { width: 1280, height: 720 }
 const WAIT_MS = 10_000
-const SCREENSHOT = join(dirname(fileURLToPath(import.meta.url)), '..', 'Reports', 'graybox-map.png')
+const REPORTS = join(dirname(fileURLToPath(import.meta.url)), '..', 'Reports')
+/** The whole map from the overhead camera (a tab that never joins, so it keeps that camera). */
+const SCREENSHOT = join(REPORTS, 'graybox-map.png')
+/** Since #24 the joined tabs use their team camera: the ghost's and the warden's own views (#25). */
+const GHOST_VIEW = join(REPORTS, 'graybox-ghost-third-person.png')
+const WARDEN_VIEW = join(REPORTS, 'graybox-warden-first-person.png')
 
 const snap = (page: Page): Promise<BlacksiteSnapshot> => page.evaluate(() => window.__blacksite.snapshot())
 
@@ -80,12 +86,44 @@ test('each tab renders every solid of the shared map; screenshot for review', as
     }
     expect(EXPECTED_MAP).toEqual({ id: 'graybox-1', renderedSolids: 16 })
 
-    // Let a few frames draw with both player boxes in place, then save the view.
-    await frames(a.page, 10)
-    mkdirSync(dirname(SCREENSHOT), { recursive: true })
-    const png = await a.page.screenshot({ path: SCREENSHOT })
-    await testInfo.attach('graybox-map', { body: png, contentType: 'image/png' })
-    expect(png.length).toBeGreaterThan(10_000) // a rendered scene, not an empty page
+    // The joined tabs are in their team cameras (#24): tab A, the first
+    // joiner, is the ghost in third person and tab B the warden in first
+    // person. Save each view, then the overhead view of the whole map from a
+    // third tab whose matchmaking request is refused, so it never joins and
+    // keeps the overhead camera (it shows the map without players).
+    const sa = await snap(a.page)
+    const sb = await snap(b.page)
+    expect(sa.camera?.mode, 'tab A (the ghost) is in third person').toBe('third-person')
+    expect(sb.camera?.mode, 'tab B (the warden) is in first person').toBe('first-person')
+    mkdirSync(REPORTS, { recursive: true })
+    for (const [tab, path, name] of [
+      [a, GHOST_VIEW, 'ghost-third-person'],
+      [b, WARDEN_VIEW, 'warden-first-person'],
+    ] as const) {
+      await frames(tab.page, 10)
+      const png = await tab.page.screenshot({ path })
+      await testInfo.attach(name, { body: png, contentType: 'image/png' })
+      // Lower bar than the map view: the warden faces a nearby wall, a mostly flat image.
+      expect(png.length, `${name}: a rendered scene, not an empty page`).toBeGreaterThan(5_000)
+    }
+
+    const context = await browser.newContext({ viewport: VIEWPORT })
+    try {
+      const page = await context.newPage()
+      await page.route('**/matchmake/**', (route) => route.abort())
+      await page.goto('/')
+      await expect(page.locator('#game-canvas')).toHaveAttribute('data-engine', /^Babylon\.js/)
+      await expect(page.locator('#hud')).toContainText('offline')
+      const s = await snap(page)
+      expect(s.map).toMatchObject(EXPECTED_MAP)
+      expect(s.camera, 'a tab that never joined keeps the overhead camera').toEqual({ mode: 'overhead', yaw: 0 })
+      await frames(page, 10)
+      const png = await page.screenshot({ path: SCREENSHOT })
+      await testInfo.attach('graybox-map', { body: png, contentType: 'image/png' })
+      expect(png.length).toBeGreaterThan(10_000) // a rendered scene, not an empty page
+    } finally {
+      await context.close()
+    }
 
     expect(a.errors).toEqual([])
     expect(b.errors).toEqual([])

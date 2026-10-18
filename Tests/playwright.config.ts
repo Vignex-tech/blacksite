@@ -8,10 +8,12 @@ export default defineConfig({
   testDir: './e2e',
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 1 : 0,
-  // Browser pages joinOrCreate the one shared my_room (MAX_CLIENTS 8). One
-  // worker keeps specs from landing in each other's room and changing the
-  // player counts and boxes they check (e2e/two-players.spec.ts).
-  workers: 1,
+  // Browser pages joinOrCreate the one shared my_room (MAX_CLIENTS 8), so the
+  // chromium project runs on one worker: specs must not land in each other's
+  // room and change the player counts and boxes they check. The SDK specs
+  // only create fresh rooms and join them by id, so their two files run side
+  // by side (tests within a file stay in order) to keep e2e under 90 s (#25).
+  workers: 2,
   reporter: process.env.CI ? [['list'], ['html', { open: 'never' }]] : 'list',
   use: {
     baseURL: `http://localhost:${port}`,
@@ -21,11 +23,12 @@ export default defineConfig({
     // Node-side @colyseus/sdk clients against the real server. Runs first, on
     // its own, so browser pages (which joinOrCreate the shared room) can't
     // join its rooms and change the player counts it asserts.
-    { name: 'server-integration', testMatch: /\.integration\.spec\.ts$/ },
+    { name: 'server-integration', testMatch: /\.integration\.spec\.ts$/, workers: 2 },
     {
       name: 'chromium',
       testIgnore: /\.integration\.spec\.ts$/,
       dependencies: ['server-integration'],
+      workers: 1,
       use: { ...devices['Desktop Chrome'] },
     },
   ],

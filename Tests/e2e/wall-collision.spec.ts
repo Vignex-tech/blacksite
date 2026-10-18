@@ -1,7 +1,22 @@
 import { expect, test, type Browser, type Page } from '@playwright/test'
 import type { BlacksitePlayerSnapshot, BlacksiteSnapshot } from '../../shared/testhook.js'
 import { BOUND } from '../../server/build/rooms/MyRoom.js'
-import { overlapping, stopAlongZ } from './support/geometry.js'
+import { PLAYER_HALF_SIZE, overlapping, solid, stopAlongZ } from './support/geometry.js'
+import { TEAM_SPEED } from '../../shared/protocol.js'
+import { stepFor } from './support/movement.js'
+import { analyse, expectNoOverlap, pathClear, track } from './support/legs.js'
+import {
+  RAD_PER_PIXEL,
+  closeTabs,
+  joined as joinedTab,
+  local,
+  lockPointer,
+  moveMouse,
+  openTab,
+  pageNow,
+  startSampler,
+  type Tab,
+} from './support/tabs.js'
 import { angleDiff } from './support/intent.js'
 import { expectTeamsAndYaws } from './support/hook.js'
 
@@ -28,6 +43,8 @@ const WALK_MS = 20_000
 const EPS = 1e-4
 /** Polls of the held key after reaching the wall during which the player must not move. */
 const HOLD_POLLS = 10
+/** How long the rotated test keeps W held after reaching the wall (ms). */
+const SLIDE_MS = 600
 
 async function snap(page: Page): Promise<BlacksiteSnapshot> {
   return page.evaluate(() => window.__blacksite.snapshot())
@@ -135,5 +152,100 @@ test('holding W toward a wall stops the local player at the wall face, as seen i
   } finally {
     await a.context().close()
     await b.context().close()
+  }
+})
+
+// #25: the rotated variant. The ghost turns its camera (pointer lock and the
+// mouse, as a player does) to roughly 45 degrees, holds W into the south wall
+// of the building, and slides along it: z stays flush with the wall face
+// while x keeps going, at the ghost's speed times sin(yaw). Nobody ever
+// overlaps a solid in either tab.
+//
+// The yaw is aimed from the ghost's actual spawn: 45 degrees when that line
+// meets the wall wall-s-e with room to slide, otherwise the angle to the
+// nearest such point (about 23 to 58 degrees over the whole ghost spawn area).
+
+test('rotated: a ghost turned about 45 degrees walks into a wall and slides along it, never overlapping, as seen in both tabs', async ({ browser }) => {
+  test.setTimeout(90_000)
+  let a: Tab | undefined
+  let b: Tab | undefined
+  try {
+    a = await openTab(browser, 'tab A')
+    await joinedTab(a, 1)
+    b = await openTab(browser, 'tab B')
+    await joinedTab(b, 2)
+    const sa = await joinedTab(a, 2)
+    expect(sa.localTeam, 'the first tab of a fresh room is the ghost').toBe('ghost')
+    const me = local(sa)
+    const step = stepFor(me)
+
+    const wall = solid('wall-s-e')
+    const face = wall.min.z - PLAYER_HALF_SIZE
+    const run = face - me.z
+    expect(run, 'the ghost spawned south of the wall').toBeGreaterThan(3)
+    // Contact x along 45 degrees, kept where the box is well on the wall and can slide for a while.
+    const contactX = Math.min(Math.max(me.x + run, wall.min.x + 1), wall.max.x - 2)
+    const pixels = Math.round(Math.atan2(contactX - me.x, run) / RAD_PER_PIXEL)
+    const yaw = pixels * RAD_PER_PIXEL
+    expect(yaw, 'a clearly rotated yaw').toBeGreaterThan(0.35)
+    expect(yaw).toBeLessThan(1.1)
+    expect(pathClear(me, yaw, run / Math.cos(yaw) - 0.1), `the path from ${me.x},${me.z} at yaw ${yaw} is clear up to the wall`).toBe(true)
+
+    await lockPointer(a)
+    await moveMouse(a, pixels)
+    expect(angleDiff((await snap(a.page)).camera!.yaw, yaw)).toBeLessThan(1e-6)
+    for (const t of [a, b]) {
+      await expect
+        .poll(async () => angleDiff(get(await snap(t.page), me.id).yaw, yaw), { message: `${t.name} sees the ghost turn`, timeout: WAIT_MS })
+        .toBeLessThan(0.0101)
+    }
+
+    const stopA = await startSampler(a.page)
+    const stopB = await startSampler(b.page)
+    let contact = NaN
+    await a.page.keyboard.down('KeyW')
+    try {
+      await expect
+        .poll(async () => Math.abs(get(await snap(a!.page), me.id).z - face), { message: `the ghost reaches the wall face z ${face}`, intervals: [20], timeout: 20_000 })
+        .toBeLessThan(EPS)
+      contact = await pageNow(a.page)
+      await a.page.waitForTimeout(SLIDE_MS)
+    } finally {
+      await a.page.keyboard.up('KeyW')
+    }
+    await a.page.waitForTimeout(250)
+    const samplesA = await stopA()
+    const samplesB = await stopB()
+    expectNoOverlap(samplesA, 'tab A')
+    expectNoOverlap(samplesB, 'tab B')
+
+    const all = track(samplesA, me.id).points
+    // Approach: a straight line along (sin yaw, cos yaw) up to the face.
+    const approach = analyse({ points: all.filter((p) => p.z < face - EPS) }, step)
+    expect(angleDiff(approach.heading, yaw), `approach along the camera yaw (heading ${approach.heading})`).toBeLessThan(0.01)
+    // Slide: flush with the face, x only increases, at the ghost's speed times sin(yaw).
+    const slide = all.filter((p) => p.t >= contact)
+    expect(slide.length, 'samples while sliding').toBeGreaterThan(10)
+    for (const p of slide) expect(Math.abs(p.z - face), `flush with the wall while sliding (z ${p.z})`).toBeLessThan(EPS)
+    for (let i = 1; i < slide.length; i++) expect(slide[i].x, 'x never goes back while sliding').toBeGreaterThanOrEqual(slide[i - 1].x)
+    const s = analyse({ points: slide }, step * Math.sin(yaw))
+    expect(s.end.x - s.start.x, 'the ghost slid along the wall').toBeGreaterThan(step * Math.sin(yaw) * 5)
+    expect(s.end.x + PLAYER_HALF_SIZE, 'still against the wall at the end').toBeLessThan(wall.max.x)
+    expect(Math.abs(s.moves - Math.round(s.moves)), `the slide is a whole number of x components (${s.moves})`).toBeLessThan(0.02)
+    const slideSpeed = TEAM_SPEED.ghost * Math.sin(yaw)
+    // Loose lower bound: the client's send timer slows down on a busy machine (see cameras.spec.ts).
+    expect(s.sustainedSpeed, `slide speed about TEAM_SPEED.ghost * sin(yaw) = ${slideSpeed}`).toBeGreaterThan(slideSpeed * 0.6)
+    expect(s.sustainedSpeed, `slide speed not above TEAM_SPEED.ghost * sin(yaw) = ${slideSpeed}`).toBeLessThan(slideSpeed * 1.1)
+
+    const end = get(await snap(a.page), me.id)
+    await expect
+      .poll(async () => {
+        const p = get(await snap(b!.page), me.id)
+        return Math.abs(p.x - end.x) < EPS && Math.abs(p.z - face) < EPS && angleDiff(p.yaw, yaw) < EPS
+      }, { message: 'tab B sees the ghost flush with the wall where it stopped', timeout: WAIT_MS })
+      .toBe(true)
+    for (const t of [a, b]) expect(t.errors, `${t.name}: no console errors`).toEqual([])
+  } finally {
+    await closeTabs(a, b)
   }
 })

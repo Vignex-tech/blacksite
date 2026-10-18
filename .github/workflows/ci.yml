@@ -67,8 +67,10 @@ jobs:
         working-directory: Tests
         run: npm run test:e2e
 
-      # Screenshot of the rendered graybox map (e2e/map.spec.ts), for a human to
-      # look at. Uploaded on every run; no test compares its pixels.
+      # Screenshots from e2e/map.spec.ts, for a human to look at: the whole map
+      # from the overhead camera (graybox-map.png) and the ghost's third-person
+      # and the warden's first-person views (#25). Uploaded on every run; no
+      # test compares their pixels.
       - name: Upload map screenshot
         if: ${{ !cancelled() }}
         uses: actions/upload-artifact@v4
