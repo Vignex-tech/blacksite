@@ -11,17 +11,19 @@ Last updated 2026-10-18 by the local Claude Code session on the owner's Windows 
 ## Milestone #1: two tabs join the same room and each sees the other move
 | # | Issue | Agent | Status |
 |---|---|---|---|
-| 1 | Milestone (tracking) | none | blocked on server work |
+| 1 | Milestone (tracking) | none | blocked on #6 |
 | 2 | Babylon scene: ground, camera, light, a box per player | gameplay-engineer | ready to start |
 | 3 | QA: check the scene; start the Colyseus server in Playwright | qa-build | after #2 |
-| 4 | Join the shared room, WASD movement, render players | gameplay-engineer | after #2 and #3, plus server work |
-| 5 | QA: two-page Playwright test where each sees the other move | qa-build | after #4, plus server work |
+| 4 | Join the shared room, WASD movement, render players; defines the `shared/` contract | gameplay-engineer | after #2 and #3; visible result needs #6 |
+| 5 | QA: two-page Playwright test where each sees the other move | qa-build | after #4 and #6 |
+| 6 | Server: player state, join/leave and validated move handler | server-engineer | after #4 (`shared/` contract) |
+| 7 | QA: verify server player state, join/leave and move validation | qa-build | after #6, #3 and #4 |
 
 Note on #4: the client must derive its WebSocket URL from `location` (wss on https), not hard-code `ws://localhost:2567`, because the game is shared through an https tunnel.
 
 ## Decisions and open questions
 - Agents (`.claude/agents/`): director, gameplay-engineer, server-engineer, qa-build. Each edits only its own folders. The main session dispatches issues from the director's hand-off table, because subagents can't start other subagents.
-- **Decided:** the server-engineer agent was added now, because milestone #1 needs server work. Next step: the director files the server work in `Docs/backlog.md` as a server-engineer issue plus its qa-build check, and links both from #1.
+- **Decided:** the server-engineer agent was added now, because milestone #1 needs server work. The director filed that server work as #6 (server-engineer) and #7 (its qa-build check), linked from #1.
 - `CLAUDE.md` now holds the full game brief and the rules every agent follows (server authority, no hidden-information leaks, URL from `location`). The detailed original brief is the owner's master prompt, kept outside the repo.
 - Env files: `.env` and `.env.*` are git-ignored; only `server/.env.example` is committed.
 - Blender is deferred until the art phase, to save RAM.
