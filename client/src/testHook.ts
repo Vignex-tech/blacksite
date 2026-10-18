@@ -1,4 +1,5 @@
 import type { BlacksiteSnapshot, BlacksiteTestHook } from '../../shared/testhook.js'
+import type { Team } from '../../shared/protocol.js'
 import type { PlayerView } from './net.ts'
 
 /**
@@ -27,6 +28,8 @@ interface PlayerRecord {
   x: number
   z: number
   isLocal: boolean
+  team: Team | null
+  yaw: number
 }
 
 export function installTestHook(target: Window = window): TestHookRecorder {
@@ -44,7 +47,8 @@ export function installTestHook(target: Window = window): TestHookRecorder {
         sessionId,
         players: [...players.entries()]
           .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
-          .map(([id, p]) => ({ id, x: p.x, z: p.z, isLocal: p.isLocal })),
+          .map(([id, p]) => ({ id, x: p.x, z: p.z, isLocal: p.isLocal, team: p.team, yaw: p.yaw })),
+        localTeam: [...players.values()].find((p) => p.isLocal)?.team ?? null,
         map: { id: mapId, renderedSolids },
       }
     },
@@ -60,9 +64,11 @@ export function installTestHook(target: Window = window): TestHookRecorder {
 
   return {
     wrapView: (view) => ({
-      upsertPlayer(id, x, z, isLocal = false) {
-        players.set(id, { x, z, isLocal })
-        view.upsertPlayer(id, x, z, isLocal)
+      upsertPlayer(id, x, z, isLocal = false, pose) {
+        players.set(id, { x, z, isLocal, team: pose?.team ?? null, yaw: pose?.yaw ?? 0 })
+        // Forward exactly the arguments received (no trailing undefined).
+        if (pose) view.upsertPlayer(id, x, z, isLocal, pose)
+        else view.upsertPlayer(id, x, z, isLocal)
       },
       removePlayer(id) {
         players.delete(id)

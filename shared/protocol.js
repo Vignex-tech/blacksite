@@ -13,7 +13,7 @@ export const MOVE_MESSAGE = 'move'
 export const GROUND_SIZE = 40
 
 // Teams (M3, #18). Conventions and the yaw formula are documented in
-// protocol.d.ts. Nothing reads these yet; the server adopts them in #20.
+// protocol.d.ts. The server assigns teams and applies the speeds since #20.
 
 /** The two teams. Equal to the keys of GRAYBOX_MAP.spawnAreas. */
 export const TEAMS = Object.freeze(['ghost', 'warden'])

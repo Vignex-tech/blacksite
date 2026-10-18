@@ -66,17 +66,13 @@ export interface MoveMessage {
 export interface PlayerState {
   x: number
   z: number
-  /**
-   * The player's team, assigned by the server on join (clients can't choose).
-   * Optional until the server sets it (#20); #22 makes it required.
-   */
-  team?: Team
+  /** The player's team, assigned by the server on join (clients can't choose). */
+  team: Team
   /**
    * Facing in radians, -pi..pi, same convention as `MoveMessage.yaw`. In M3
-   * the server spawns every player with yaw 0 (facing +z). Optional until the
-   * server sets it (#20); #22 makes it required.
+   * the server spawns every player with yaw 0 (facing +z).
    */
-  yaw?: number
+  yaw: number
 }
 
 /** Minimal read-only view of a map keyed by string (MapSchema satisfies it). */

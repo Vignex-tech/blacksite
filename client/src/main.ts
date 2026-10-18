@@ -1,12 +1,16 @@
 import './style.css'
 import { createGameScene, type GameScene } from './scene.ts'
 import { MovementInput } from './input.ts'
-import { joinGame, sendMove } from './net.ts'
+import { joinGame, sendMove, type PlayerView } from './net.ts'
+import type { Team } from '../../shared/protocol.js'
 import type { Room } from '@colyseus/sdk'
 import { installTestHook } from './testHook.ts'
 
 /** How often a held movement key sends a "move" message. */
 const MOVE_SEND_HZ = 20
+
+/** HUD wording for each team. */
+const TEAM_LABEL: Record<Team, string> = { ghost: 'a Ghost', warden: 'a Warden' }
 
 // Test hook on window.__blacksite (also in production builds; see testHook.ts).
 const testHook = installTestHook()
@@ -52,15 +56,30 @@ function start(view: GameScene): void {
   }, 1000 / MOVE_SEND_HZ)
 
   let playerCount: number | null = null
+  let localTeam: Team | null = null
   const showOnline = (): void =>
     setStatus(
       playerCount === null
         ? 'online, waiting for player state'
-        : `online, ${playerCount} player${playerCount === 1 ? '' : 's'}`,
+        : `online, ${playerCount} player${playerCount === 1 ? '' : 's'}` +
+            (localTeam ? `, you are ${TEAM_LABEL[localTeam]}` : ''),
     )
 
+  // Watches the local player's team (as received from room state) for the HUD.
+  const inner = testHook.wrapView(view)
+  const watched: PlayerView = {
+    upsertPlayer(id, x, z, isLocal = false, pose) {
+      inner.upsertPlayer(id, x, z, isLocal, pose)
+      if (isLocal && pose && pose.team !== localTeam) {
+        localTeam = pose.team
+        if (room) showOnline()
+      }
+    },
+    removePlayer: (id) => inner.removePlayer(id),
+  }
+
   setStatus('connecting...')
-  joinGame(testHook.wrapView(view), (count) => {
+  joinGame(watched, (count) => {
     playerCount = count
     if (room) showOnline()
   })
@@ -70,6 +89,7 @@ function start(view: GameScene): void {
       showOnline()
       joined.onLeave(() => {
         room = null
+        localTeam = null
         testHook.setDisconnected()
         setStatus('disconnected from server')
       })

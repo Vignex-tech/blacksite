@@ -1,5 +1,5 @@
 import { Callbacks, Client, type Room } from '@colyseus/sdk'
-import { MOVE_MESSAGE, ROOM_NAME, type MoveMessage, type PlayerState } from '../../shared/protocol.js'
+import { MOVE_MESSAGE, ROOM_NAME, TEAMS, type MoveMessage, type PlayerState, type Team } from '../../shared/protocol.js'
 
 /** Port the Colyseus server listens on by default (server/src/index.ts). */
 const SERVER_PORT = 2567
@@ -21,9 +21,25 @@ export function serverUrl(loc: Location = location): string {
   return `${protocol}//${host}`
 }
 
+/** Team and facing of a player as received from room state. */
+export interface PlayerPose {
+  /** null if the state holds no valid team (yet). */
+  team: Team | null
+  /** Radians, 0 faces +z (0 if the state holds no finite yaw yet). */
+  yaw: number
+}
+
 export interface PlayerView {
-  upsertPlayer(id: string, x: number, z: number, isLocal?: boolean): void
+  /** `pose` is omitted only by callers that know no team or facing. */
+  upsertPlayer(id: string, x: number, z: number, isLocal?: boolean, pose?: PlayerPose): void
   removePlayer(id: string): void
+}
+
+/** Reads team and yaw from a synced player, tolerating missing or unknown values. */
+export function poseOf(player: PlayerState): PlayerPose {
+  const team = (TEAMS as readonly string[]).includes(player.team) ? player.team : null
+  const yaw = typeof player.yaw === 'number' && Number.isFinite(player.yaw) ? player.yaw : 0
+  return { team, yaw }
 }
 
 /** Joins the shared room and mirrors `state.players` into the view. Rejects if joining fails. */
@@ -37,10 +53,11 @@ export async function joinGame(view: PlayerView, onPlayerCount: (count: number) 
   const callbacks = Callbacks.get(room) as unknown as PlayersCallbacks
   callbacks.onAdd('players', (player, sessionId) => {
     const isLocal = sessionId === room.sessionId
-    view.upsertPlayer(sessionId, player.x, player.z, isLocal)
+    const update = (): void => view.upsertPlayer(sessionId, player.x, player.z, isLocal, poseOf(player))
+    update()
     ids.add(sessionId)
     onPlayerCount(ids.size)
-    callbacks.onChange(player, () => view.upsertPlayer(sessionId, player.x, player.z, isLocal))
+    callbacks.onChange(player, update)
   })
   callbacks.onRemove('players', (_player, sessionId) => {
     view.removePlayer(sessionId)

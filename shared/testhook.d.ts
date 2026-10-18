@@ -9,6 +9,12 @@
 //   (rule 2: once state is filtered per team, the hook shows no more than the
 //   client was sent). It never adds a server message or synced state.
 // - It ships in the production build, because Playwright tests client/dist.
+// - Versioning: fields are only ever added in version 1 (#22 added `team`,
+//   `yaw` and `localTeam`). `version` is bumped only if a field is removed or
+//   changes meaning, so tests should match the fields they need, not the
+//   exact shape.
+
+import type { Team } from './protocol.js'
 
 /** One player as the client currently knows it from room state. */
 export interface BlacksitePlayerSnapshot {
@@ -19,6 +25,17 @@ export interface BlacksitePlayerSnapshot {
   z: number
   /** True only for this client's own player (id === sessionId). */
   isLocal: boolean
+  /**
+   * The player's team as received from room state. null only if this client
+   * hasn't received a valid team for the player yet.
+   */
+  team: Team | null
+  /**
+   * Facing in radians as received from room state (the server wraps it into
+   * -pi..pi, so pi may arrive as -pi; compare angles modulo 2 pi). 0 until
+   * received.
+   */
+  yaw: number
 }
 
 export interface BlacksiteSnapshot {
@@ -30,6 +47,8 @@ export interface BlacksiteSnapshot {
   sessionId: string | null
   /** Every player in room state, sorted by id. Empty when not connected. */
   players: BlacksitePlayerSnapshot[]
+  /** This client's own team once received from room state, otherwise null. */
+  localTeam: Team | null
   /** Rendered map. `{ id: null, renderedSolids: 0 }` until the map is rendered (#14). */
   map: { id: string | null; renderedSolids: number }
 }

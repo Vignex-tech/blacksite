@@ -1,0 +1,119 @@
+import type { Scene } from '@babylonjs/core/scene'
+import { CreateBox } from '@babylonjs/core/Meshes/Builders/boxBuilder'
+import { CreateCylinder } from '@babylonjs/core/Meshes/Builders/cylinderBuilder'
+import { StandardMaterial } from '@babylonjs/core/Materials/standardMaterial'
+import { Color3 } from '@babylonjs/core/Maths/math.color'
+import type { Mesh } from '@babylonjs/core/Meshes/mesh'
+import { PLAYER_HALF_SIZE, PLAYER_HEIGHT } from '../../shared/map.js'
+import type { Team } from '../../shared/protocol.js'
+import type { PlayerPose, PlayerView } from './net.ts'
+
+/**
+ * Graybox player shapes, built in code (no assets). Purely visual: they follow
+ * server state only and never move anything locally.
+ *
+ * - Ghost: a slim, dark cylinder.
+ * - Warden: a bulkier box, as wide as the collision box.
+ * - Unknown team (state not received yet): a small neutral cube.
+ *
+ * Each body has a bright "nose" child at head height on its local +z, and
+ * the body's `rotation.y` is the synced yaw, so the nose points where the
+ * player faces (yaw 0 faces +z). Your own player has a blue tint whatever its
+ * team; the others use their team colour.
+ *
+ * Mesh names: body `player-<id>`, nose `player-<id>-nose`. The body's
+ * `metadata` is `{ team, isLocal }` (`PlayerMeshMetadata`).
+ */
+
+type ShapeKind = Team | 'unknown'
+
+/** Body width (x) and depth (z) per shape. Ghost is a cylinder of that diameter. */
+const BODY_WIDTH: Record<ShapeKind, number> = {
+  ghost: 0.7,
+  warden: PLAYER_HALF_SIZE * 2,
+  unknown: PLAYER_HALF_SIZE * 2,
+}
+const BODY_HEIGHT: Record<ShapeKind, number> = {
+  ghost: PLAYER_HEIGHT,
+  warden: PLAYER_HEIGHT,
+  unknown: PLAYER_HALF_SIZE * 2,
+}
+const NOSE_SIZE = 0.25
+const NOSE_LENGTH = 0.4
+
+export interface PlayerMeshMetadata {
+  team: Team | null
+  isLocal: boolean
+}
+
+export interface PlayerRenderer extends PlayerView {
+  /** The body mesh of a player, if rendered (for tests and debugging). */
+  mesh(id: string): Mesh | undefined
+}
+
+function material(scene: Scene, name: string, diffuse: Color3, emissive = Color3.Black()): StandardMaterial {
+  const mat = new StandardMaterial(name, scene)
+  mat.diffuseColor = diffuse
+  mat.emissiveColor = emissive
+  mat.specularColor = Color3.Black() // no white glare on top faces seen from above
+  mat.freeze()
+  return mat
+}
+
+export function createPlayerRenderer(scene: Scene): PlayerRenderer {
+  const teamMats: Record<ShapeKind, StandardMaterial> = {
+    ghost: material(scene, 'ghostMat', new Color3(0.3, 0.24, 0.46), new Color3(0.06, 0.04, 0.1)),
+    warden: material(scene, 'wardenMat', new Color3(0.9, 0.45, 0.15)),
+    unknown: material(scene, 'unknownPlayerMat', new Color3(0.8, 0.8, 0.8)),
+  }
+  const localMat = material(scene, 'localPlayerMat', new Color3(0.2, 0.75, 0.95), new Color3(0.05, 0.2, 0.3))
+  const noseMat = material(scene, 'noseMat', new Color3(1, 0.9, 0.3), new Color3(0.5, 0.45, 0.1))
+
+  const bodies = new Map<string, Mesh>()
+
+  const build = (id: string, kind: ShapeKind, isLocal: boolean): Mesh => {
+    const width = BODY_WIDTH[kind]
+    const height = BODY_HEIGHT[kind]
+    const body =
+      kind === 'ghost'
+        ? CreateCylinder(`player-${id}`, { height, diameter: width, tessellation: 16 }, scene)
+        : CreateBox(`player-${id}`, { width, height, depth: width }, scene)
+    body.material = isLocal ? localMat : teamMats[kind]
+    body.position.y = height / 2
+    const metadata: PlayerMeshMetadata = { team: kind === 'unknown' ? null : kind, isLocal }
+    body.metadata = metadata
+
+    const nose = CreateBox(`player-${id}-nose`, { width: NOSE_SIZE, height: NOSE_SIZE, depth: NOSE_LENGTH }, scene)
+    nose.material = noseMat
+    nose.parent = body
+    // Sticks out of the body's front (+z) near the top.
+    nose.position.set(0, height / 2 - NOSE_SIZE, width / 2 + NOSE_LENGTH / 2 - NOSE_SIZE / 2)
+    return body
+  }
+
+  const upsertPlayer = (id: string, x: number, z: number, isLocal = false, pose?: PlayerPose): void => {
+    const kind: ShapeKind = pose?.team ?? 'unknown'
+    let body = bodies.get(id)
+    const meta = body?.metadata as PlayerMeshMetadata | undefined
+    if (body && (meta?.team ?? 'unknown') !== kind) {
+      body.dispose() // team arrived or changed: rebuild with the right shape
+      body = undefined
+    }
+    if (!body) {
+      body = build(id, kind, isLocal)
+      bodies.set(id, body)
+    }
+    body.position.x = x
+    body.position.z = z
+    body.rotation.y = pose?.yaw ?? 0
+  }
+
+  const removePlayer = (id: string): void => {
+    const body = bodies.get(id)
+    if (!body) return
+    body.dispose() // also disposes the nose (child)
+    bodies.delete(id)
+  }
+
+  return { upsertPlayer, removePlayer, mesh: (id) => bodies.get(id) }
+}
