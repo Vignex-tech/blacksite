@@ -13,7 +13,18 @@ export default defineConfig({
     baseURL: `http://localhost:${port}`,
     trace: 'on-first-retry',
   },
-  projects: [{ name: 'chromium', use: { ...devices['Desktop Chrome'] } }],
+  projects: [
+    // Node-side @colyseus/sdk clients against the real server. Runs first, on
+    // its own, so browser pages (which joinOrCreate the shared room) can't
+    // join its rooms and change the player counts it asserts.
+    { name: 'server-integration', testMatch: /\.integration\.spec\.ts$/ },
+    {
+      name: 'chromium',
+      testIgnore: /\.integration\.spec\.ts$/,
+      dependencies: ['server-integration'],
+      use: { ...devices['Desktop Chrome'] },
+    },
+  ],
   webServer: {
     command: 'node build/index.js',
     cwd: '../server',
