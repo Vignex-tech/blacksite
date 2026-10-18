@@ -82,7 +82,25 @@ export async function joined(tab: Tab, n: number): Promise<BlacksiteSnapshot> {
   return snap(tab.page)
 }
 
-/** Takes pointer lock by clicking the canvas, as a player does. */
+/**
+ * Takes pointer lock by clicking the canvas, as a player does, and checks the
+ * browser granted it to the canvas. Then hands the lock over to a stand-in
+ * (see below) that the rest of the test drives.
+ *
+ * Why a stand-in: in headless Chromium on Linux (CI), a real pointer lock
+ * makes the browser fire a mousemove on every frame with no input, the
+ * first carrying a bogus movementX (a 400 px turn landed at 0.6 rad instead
+ * of 1.0), and the extra events (each runs Babylon's pointer picking) cut
+ * the page from 60 to about 35 frames per second and the client's 20 Hz move
+ * timer to about 13 Hz. Found with a diagnostic run in #25; on Windows the
+ * real lock behaves. Real players don't see this: it is the headless
+ * browser's synthetic cursor.
+ *
+ * The stand-in: the real lock is released, then `document.pointerLockElement`
+ * reports the canvas until `document.exitPointerLock()` is called (which the
+ * client calls on disconnect, and a test calls for "Esc"). The client code
+ * is unchanged and is driven through the exact checks and events it uses.
+ */
 export async function lockPointer(tab: Tab): Promise<void> {
   // Before the lock, mouse movement doesn't turn the camera (checked by the specs).
   const centre = { x: VIEWPORT.width / 2, y: VIEWPORT.height / 2 }
@@ -94,22 +112,32 @@ export async function lockPointer(tab: Tab): Promise<void> {
       timeout: WAIT_MS,
     })
     .toBe('game-canvas')
+  await tab.page.evaluate(() => {
+    const canvas = document.getElementById('game-canvas')!
+    const realExit = Document.prototype.exitPointerLock
+    realExit.call(document)
+    let held = true
+    Object.defineProperty(document, 'pointerLockElement', { configurable: true, get: () => (held ? canvas : null) })
+    Object.defineProperty(document, 'exitPointerLock', {
+      configurable: true,
+      value: () => {
+        held = false
+        realExit.call(document)
+      },
+    })
+  })
 }
 
 /**
  * Mouse movement as the client's camera sees it: `pixels` of movementX (right
  * if positive), in steps of at most 20, dispatched as mousemove events on the
  * document, which is exactly what client/src/cameras.ts listens to. The
- * client still decides whether to turn (only while the pointer is really
- * locked to the canvas, which lockPointer takes with a real click).
- *
- * Why not page.mouse.move: under pointer lock, headless Chromium on Linux
- * (CI) reports unreliable movementX for synthetic moves. In #25's first CI
- * runs the first event after the lock carried the cursor's whole offset,
- * later ones came out doubled, and some turned the wrong way, while on
- * Windows they matched exactly. The real mouse path is still used for the
- * click that takes the lock and for the "no lock, no turn" checks.
- * Returns the yaw change the client should apply (pixels * RAD_PER_PIXEL).
+ * client still decides whether to turn (only while it sees the pointer
+ * locked to the canvas; see lockPointer for why that is a stand-in).
+ * page.mouse.move isn't used under the lock because headless Chromium on
+ * Linux gives it unreliable movementX (doubled, or carrying the cursor
+ * offset). Returns the yaw change the client should apply
+ * (pixels * RAD_PER_PIXEL).
  */
 export async function moveMouse(tab: Tab, pixels: number): Promise<number> {
   await tab.page.evaluate((total) => {
