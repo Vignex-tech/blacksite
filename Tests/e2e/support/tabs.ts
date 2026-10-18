@@ -21,8 +21,6 @@ export interface Tab {
   name: string
   errors: string[]
   sent: ReturnType<typeof captureMoves>
-  /** Where Playwright's virtual mouse is (moveMouse moves relative to it). */
-  cursor: { x: number; y: number }
 }
 
 export const snap = (page: Page): Promise<BlacksiteSnapshot> => page.evaluate(() => window.__blacksite.snapshot())
@@ -57,7 +55,7 @@ export async function openTab(
   const sent = captureMoves(page)
   await page.goto('/')
   await expect(page.locator('#game-canvas')).toHaveAttribute('data-engine', /^Babylon\.js/)
-  return { page, name, errors, sent, cursor: { x: 0, y: 0 } }
+  return { page, name, errors, sent }
 }
 
 /**
@@ -87,9 +85,9 @@ export async function joined(tab: Tab, n: number): Promise<BlacksiteSnapshot> {
 /** Takes pointer lock by clicking the canvas, as a player does. */
 export async function lockPointer(tab: Tab): Promise<void> {
   // Before the lock, mouse movement doesn't turn the camera (checked by the specs).
-  tab.cursor = { x: VIEWPORT.width / 2, y: VIEWPORT.height / 2 }
-  await tab.page.mouse.move(tab.cursor.x, tab.cursor.y)
-  await tab.page.locator('#game-canvas').click({ position: tab.cursor })
+  const centre = { x: VIEWPORT.width / 2, y: VIEWPORT.height / 2 }
+  await tab.page.mouse.move(centre.x, centre.y)
+  await tab.page.locator('#game-canvas').click({ position: centre })
   await expect
     .poll(() => tab.page.evaluate(() => document.pointerLockElement?.id ?? null), {
       message: `${tab.name}: clicking the canvas takes pointer lock`,
@@ -99,48 +97,48 @@ export async function lockPointer(tab: Tab): Promise<void> {
 }
 
 /**
- * Moves the mouse right by `pixels` (left if negative) from where it is, in
- * steps of at most 20 px, keeping y. Under pointer lock only movementX
- * matters, so the virtual cursor may leave the viewport. Returns the yaw
- * change the client rig should apply (pixels * RAD_PER_PIXEL).
+ * Mouse movement as the client's camera sees it: `pixels` of movementX (right
+ * if positive), in steps of at most 20, dispatched as mousemove events on the
+ * document, which is exactly what client/src/cameras.ts listens to. The
+ * client still decides whether to turn (only while the pointer is really
+ * locked to the canvas, which lockPointer takes with a real click).
+ *
+ * Why not page.mouse.move: under pointer lock, headless Chromium on Linux
+ * (CI) reports unreliable movementX for synthetic moves. In #25's first CI
+ * runs the first event after the lock carried the cursor's whole offset,
+ * later ones came out doubled, and some turned the wrong way, while on
+ * Windows they matched exactly. The real mouse path is still used for the
+ * click that takes the lock and for the "no lock, no turn" checks.
+ * Returns the yaw change the client should apply (pixels * RAD_PER_PIXEL).
  */
 export async function moveMouse(tab: Tab, pixels: number): Promise<number> {
-  const steps = Math.max(1, Math.ceil(Math.abs(pixels) / 20))
-  tab.cursor = { x: tab.cursor.x + pixels, y: tab.cursor.y }
-  await tab.page.mouse.move(tab.cursor.x, tab.cursor.y, { steps })
+  await tab.page.evaluate((total) => {
+    const n = Math.max(1, Math.ceil(Math.abs(total) / 20))
+    let done = 0
+    for (let i = 1; i <= n; i++) {
+      const to = Math.round((total * i) / n)
+      document.dispatchEvent(new MouseEvent('mousemove', { movementX: to - done, movementY: 0, bubbles: true }))
+      done = to
+    }
+  }, pixels)
   return pixels * RAD_PER_PIXEL
 }
 
 /**
- * Turns the camera to `target` (radians) with real mouse movement under
- * pointer lock, closed loop: move, read camera.yaw from the hook, correct.
- * Needed because synthetic mouse events in headless Chromium on Linux (CI)
- * don't always report movementX as moved: the first event after the lock
- * can carry the cursor's whole offset and later ones come out about doubled
- * (on Windows they match 0.0025 rad per pixel exactly). The rate per pixel
- * itself is unit-tested in unit/cameras.test.ts. Returns the reached yaw,
- * which is within `tol` of the target.
+ * Turns the camera to about `target` (radians) with mouse movement
+ * (moveMouse) and checks the rig turned exactly 0.0025 rad per pixel.
+ * Returns the reached yaw (within half a pixel's turn of the target).
  */
-export async function turnTo(tab: Tab, target: number, tol = 0.003): Promise<number> {
+export async function turnTo(tab: Tab, target: number): Promise<number> {
   const camYaw = async () => (await snap(tab.page)).camera!.yaw
   const wrap = (a: number) => Math.atan2(Math.sin(a), Math.cos(a))
-  // Absorb a bogus first event after the lock with a tiny move.
-  await moveMouse(tab, 1)
-  let yaw = await camYaw()
-  let gain = 1 // observed radians per (pixel * RAD_PER_PIXEL)
-  for (let i = 0; i < 12; i++) {
-    const err = wrap(target - yaw)
-    if (Math.abs(err) < tol) return yaw
-    const pixels = Math.round(err / (RAD_PER_PIXEL * gain))
-    if (pixels === 0) return yaw
-    await moveMouse(tab, pixels)
-    const next = await camYaw()
-    const seen = wrap(next - yaw) / (pixels * RAD_PER_PIXEL)
-    // Only trust a clean reading in the right direction.
-    if (seen > 0.25 && seen < 4) gain = seen
-    yaw = next
-  }
-  throw new Error(`${tab.name}: camera did not turn to ${target} (at ${yaw})`)
+  const from = await camYaw()
+  const pixels = Math.round(wrap(target - from) / RAD_PER_PIXEL)
+  const turned = await moveMouse(tab, pixels)
+  const yaw = await camYaw()
+  const want = wrap(from + turned)
+  expect(Math.abs(wrap(yaw - want)), `${tab.name}: ${pixels} px turned the camera by ${turned} rad at once (from ${from} to ${yaw})`).toBeLessThan(1e-9)
+  return yaw
 }
 
 /** Per-sample local and watched player positions recorded inside the page. */

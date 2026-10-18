@@ -8,6 +8,7 @@ import { analyse, expectNeverFasterThanLimit, expectNoOverlap, pathClear, track 
 import {
   EPS,
   MODE_FOR_TEAM,
+  RAD_PER_PIXEL,
   WAIT_MS,
   closeTabs,
   turnTo,
@@ -156,7 +157,8 @@ async function turnAndWalk(tab: Tab, other: Tab): Promise<{ speed: number; perMo
   // Before pointer lock, the mouse doesn't turn the camera or send anything.
   const tIdle = Date.now()
   await tab.page.mouse.move(100, 100)
-  await tab.page.mouse.move(500, 300, { steps: 10 })
+  await tab.page.mouse.move(300, 200, { steps: 10 })
+  await moveMouse(tab, 400)
   await tab.page.waitForTimeout(150)
   expect((await snap(tab.page)).camera?.yaw, `${tab.name}: no turn without pointer lock`).toBe(camYaw0)
   expect(tab.sent.since(tIdle), `${tab.name}: nothing sent for mouse movement without pointer lock`).toEqual([])
@@ -168,7 +170,7 @@ async function turnAndWalk(tab: Tab, other: Tab): Promise<{ speed: number; perMo
   const wantYaw = Math.atan2(Math.sin(camYaw0 + turn!), Math.cos(camYaw0 + turn!))
   await turnTo(tab, wantYaw)
   const cam = (await snap(tab.page)).camera!
-  expect(angleDiff(cam.yaw, wantYaw), `${tab.name}: the mouse turned the camera to ${wantYaw} (at ${cam.yaw})`).toBeLessThan(0.003)
+  expect(angleDiff(cam.yaw, wantYaw), `${tab.name}: the mouse turned the camera to ${wantYaw} (at ${cam.yaw})`).toBeLessThan(RAD_PER_PIXEL)
   expect(cam.mode).toBe(MODE_FOR_TEAM[team])
 
   // The server yaw follows (yaw-only moves), within the client's send threshold, in both tabs.
@@ -335,8 +337,7 @@ test('a disconnect returns the camera to overhead at yaw 0 and releases the poin
     const team = s.localTeam!
     expect(s.camera).toEqual({ mode: MODE_FOR_TEAM[team], yaw: 0 })
     await lockPointer(tab)
-    await moveMouse(tab, 200)
-    expect(angleDiff((await snap(tab.page)).camera!.yaw, 0), 'the mouse turned the camera').toBeGreaterThan(0.2)
+    await turnTo(tab, 0.5)
 
     // Network loss: the browser drops the room socket.
     await tab.page.context().setOffline(true)
