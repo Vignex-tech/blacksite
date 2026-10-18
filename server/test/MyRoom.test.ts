@@ -3,7 +3,7 @@ import { ColyseusTestServer, boot } from "@colyseus/testing";
 
 import appConfig from "../src/app.config.js";
 import { ROOM_NAME, MOVE_MESSAGE, GROUND_SIZE } from "../../shared/protocol.js";
-import { MyRoom, SPEED, BOUND, SPAWN_SPREAD } from "../src/rooms/MyRoom.js";
+import { MyRoom, SPEED, BOUND, SPAWN_SPREAD, MOVE_RATE_HZ, MOVE_BURST } from "../src/rooms/MyRoom.js";
 
 const EPS = 1e-9;
 
@@ -121,6 +121,76 @@ describe("MyRoom", () => {
       await sendMove(room, a, { dx: 5, dz: -5 });
     }
     assert.deepStrictEqual(pos(room, a.sessionId), { x: BOUND, z: -BOUND });
+  });
+
+  /** Replaces the room's clock with a manual one, starting at the current time. */
+  function controlTime(room: MyRoom) {
+    let t = room.now();
+    room.now = () => t;
+    return (ms: number) => { t += ms; };
+  }
+
+  it("limits a burst of moves at one instant to MOVE_BURST moves", async () => {
+    const { room, a } = await setup();
+    controlTime(room);
+    const a0 = pos(room, a.sessionId);
+
+    for (let i = 0; i < 50; i++) {
+      await sendMove(room, a, { dx: 1, dz: 0 });
+    }
+
+    const a1 = pos(room, a.sessionId);
+    assert.ok(Math.abs(a1.x - (a0.x + MOVE_BURST * SPEED)) < EPS);
+    assert.strictEqual(a1.z, a0.z);
+    // Over-budget input is ignored, not fatal.
+    assert.strictEqual(room.clients.length, 2);
+  });
+
+  it("caps a flood of moves at SPEED * MOVE_RATE_HZ units per second", async () => {
+    const { room, a } = await setup();
+    const advance = controlTime(room);
+    const a0 = pos(room, a.sessionId);
+
+    // 100 Hz for one simulated second: 5x the intended rate.
+    for (let i = 0; i < 100; i++) {
+      advance(10);
+      await sendMove(room, a, { dx: 1, dz: 0 });
+    }
+
+    const moved = pos(room, a.sessionId).x - a0.x;
+    const limit = SPEED * MOVE_RATE_HZ * 1 + SPEED * MOVE_BURST;
+    assert.ok(moved <= limit + EPS, `moved ${moved}, limit ${limit}`);
+    // And it still moved at about full speed, not less.
+    assert.ok(moved >= SPEED * MOVE_RATE_HZ - EPS, `moved ${moved}`);
+  });
+
+  it("moves at full speed for normal input at MOVE_RATE_HZ", async () => {
+    const { room, a } = await setup();
+    const advance = controlTime(room);
+    const a0 = pos(room, a.sessionId);
+
+    const n = 40; // two simulated seconds at 20 Hz
+    for (let i = 0; i < n; i++) {
+      advance(1000 / MOVE_RATE_HZ);
+      await sendMove(room, a, { dx: -1, dz: 0 });
+    }
+
+    assert.ok(Math.abs(pos(room, a.sessionId).x - (a0.x - n * SPEED)) < EPS);
+  });
+
+  it("does not let invalid payloads spend the movement budget", async () => {
+    const { room, a } = await setup();
+    controlTime(room);
+    const a0 = pos(room, a.sessionId);
+
+    for (let i = 0; i < 10; i++) {
+      await sendMove(room, a, { dx: NaN, dz: 0 });
+    }
+    for (let i = 0; i < MOVE_BURST; i++) {
+      await sendMove(room, a, { dx: 0, dz: 1 });
+    }
+
+    assert.ok(Math.abs(pos(room, a.sessionId).z - (a0.z + MOVE_BURST * SPEED)) < EPS);
   });
 
   it("removes the player when a client leaves", async () => {
