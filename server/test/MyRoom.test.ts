@@ -1,20 +1,25 @@
 import assert from "assert";
-import { ColyseusTestServer, boot } from "@colyseus/testing";
+import type { ColyseusTestServer } from "@colyseus/testing";
+import { testServer } from "./testServer.js";
 
 import appConfig from "../src/app.config.js";
 import { ROOM_NAME, MOVE_MESSAGE, GROUND_SIZE } from "../../shared/protocol.js";
 import { GRAYBOX_MAP } from "../../shared/map.js";
 import { overlapsAny } from "../src/rules/collision.js";
 import { SOLIDS, FACE_EPS, assertClear, inRect } from "./mapHelpers.js";
-import { MyRoom, SPEED, BOUND, MOVE_RATE_HZ, MOVE_BURST } from "../src/rooms/MyRoom.js";
+import { MyRoom, SPEED, BOUND, MOVE_RATE_HZ, MOVE_BURST, TEAM_STEP } from "../src/rooms/MyRoom.js";
+
+/** The first joiner of a room is a ghost; its step per accepted move. */
+const G = TEAM_STEP.ghost;
+/** Per-axis step of a full diagonal (intent length capped at 1). */
+const DIAG = G / Math.SQRT2;
 
 const EPS = 1e-9;
 
 describe("MyRoom", () => {
   let colyseus: ColyseusTestServer<typeof appConfig>;
 
-  before(async () => colyseus = await boot(appConfig));
-  after(async () => colyseus.shutdown());
+  before(async () => { colyseus = await testServer(); });
 
   beforeEach(async () => {
     await colyseus.cleanup();
@@ -56,7 +61,12 @@ describe("MyRoom", () => {
     assert.ok(a.state.players.get(b.sessionId));
   });
 
-  it("moves only the sender by dx/dz * SPEED", async () => {
+  it("keeps SPEED as the legacy step, equal to the warden step", () => {
+    assert.strictEqual(SPEED, TEAM_STEP.warden);
+    assert.ok(Math.abs(SPEED - 0.1) < EPS);
+  });
+
+  it("moves only the sender by its team step, diagonal capped at length 1", async () => {
     const { room, a, b } = await setup();
     const a0 = pos(room, a.sessionId);
     const b0 = pos(room, b.sessionId);
@@ -64,8 +74,8 @@ describe("MyRoom", () => {
     await sendMove(room, a, { dx: 1, dz: -1 });
 
     const a1 = pos(room, a.sessionId);
-    assert.ok(Math.abs(a1.x - (a0.x + SPEED)) < EPS);
-    assert.ok(Math.abs(a1.z - (a0.z - SPEED)) < EPS);
+    assert.ok(Math.abs(a1.x - (a0.x + DIAG)) < EPS);
+    assert.ok(Math.abs(a1.z - (a0.z - DIAG)) < EPS);
     assert.deepStrictEqual(pos(room, b.sessionId), b0);
 
     await room.waitForNextPatch();
@@ -99,22 +109,22 @@ describe("MyRoom", () => {
     assert.strictEqual(room.clients.length, 2);
   });
 
-  it("clamps out-of-range input to at most SPEED per message", async () => {
+  it("clamps out-of-range input to at most one team step per message", async () => {
     const { room, a } = await setup();
     const a0 = pos(room, a.sessionId);
 
     await sendMove(room, a, { dx: 1000, dz: -1e9 });
 
     const a1 = pos(room, a.sessionId);
-    assert.ok(Math.abs(a1.x - (a0.x + SPEED)) < EPS);
-    assert.ok(Math.abs(a1.z - (a0.z - SPEED)) < EPS);
+    assert.ok(Math.abs(a1.x - (a0.x + DIAG)) < EPS);
+    assert.ok(Math.abs(a1.z - (a0.z - DIAG)) < EPS);
   });
 
   it("never lets a player leave the ground bounds", async () => {
     const { room, a } = await setup();
     const player = room.state.players.get(a.sessionId);
-    player.x = BOUND - SPEED / 2;
-    player.z = -BOUND + SPEED / 2;
+    player.x = BOUND - DIAG / 2;
+    player.z = -BOUND + DIAG / 2;
 
     for (let i = 0; i < 5; i++) {
       await sendMove(room, a, { dx: 1, dz: -1 });
@@ -144,13 +154,13 @@ describe("MyRoom", () => {
     }
 
     const a1 = pos(room, a.sessionId);
-    assert.ok(Math.abs(a1.x - (a0.x + MOVE_BURST * SPEED)) < EPS);
+    assert.ok(Math.abs(a1.x - (a0.x + MOVE_BURST * G)) < EPS);
     assert.strictEqual(a1.z, a0.z);
     // Over-budget input is ignored, not fatal.
     assert.strictEqual(room.clients.length, 2);
   });
 
-  it("caps a flood of moves at SPEED * MOVE_RATE_HZ units per second", async () => {
+  it("caps a flood of moves at the team speed (G * MOVE_RATE_HZ units per second)", async () => {
     const { room, a } = await setup();
     const advance = controlTime(room);
     const a0 = pos(room, a.sessionId);
@@ -162,10 +172,10 @@ describe("MyRoom", () => {
     }
 
     const moved = pos(room, a.sessionId).x - a0.x;
-    const limit = SPEED * MOVE_RATE_HZ * 1 + SPEED * MOVE_BURST;
+    const limit = G * MOVE_RATE_HZ * 1 + G * MOVE_BURST;
     assert.ok(moved <= limit + EPS, `moved ${moved}, limit ${limit}`);
     // And it still moved at about full speed, not less.
-    assert.ok(moved >= SPEED * MOVE_RATE_HZ - EPS, `moved ${moved}`);
+    assert.ok(moved >= G * MOVE_RATE_HZ - EPS, `moved ${moved}`);
   });
 
   it("moves at full speed for normal input at MOVE_RATE_HZ", async () => {
@@ -179,7 +189,7 @@ describe("MyRoom", () => {
       await sendMove(room, a, { dx: -1, dz: 0 });
     }
 
-    assert.ok(Math.abs(pos(room, a.sessionId).x - (a0.x - n * SPEED)) < EPS);
+    assert.ok(Math.abs(pos(room, a.sessionId).x - (a0.x - n * G)) < EPS);
   });
 
   it("does not let invalid payloads spend the movement budget", async () => {
@@ -194,7 +204,7 @@ describe("MyRoom", () => {
       await sendMove(room, a, { dx: 0, dz: 1 });
     }
 
-    assert.ok(Math.abs(pos(room, a.sessionId).z - (a0.z + MOVE_BURST * SPEED)) < EPS);
+    assert.ok(Math.abs(pos(room, a.sessionId).z - (a0.z + MOVE_BURST * G)) < EPS);
   });
 
   it("removes the player when a client leaves", async () => {
@@ -229,14 +239,16 @@ describe("MyRoom", () => {
       return { room, client, player, move, place };
     }
 
-    it("spawns joiners alternately in the ghost and warden areas, clear of solids", async () => {
+    it("fills a fresh room ghost, warden, ghost, warden, each in its team's area, clear of solids", async () => {
       const room = await colyseus.createRoom<MyRoom>(ROOM_NAME, {});
       const clients = [];
       for (let i = 0; i < 4; i++) clients.push(await colyseus.connectTo(room));
-      const { ghost, warden } = GRAYBOX_MAP.spawnAreas;
       clients.forEach((c, i) => {
         const p = room.state.players.get(c.sessionId);
-        assert.ok(inRect(p, i % 2 === 0 ? ghost : warden), `joiner ${i} at (${p.x}, ${p.z})`);
+        const team = i % 2 === 0 ? "ghost" : "warden";
+        assert.strictEqual(p.team, team, `joiner ${i}`);
+        assert.strictEqual(p.yaw, 0, `joiner ${i}`);
+        assert.ok(inRect(p, GRAYBOX_MAP.spawnAreas[team]), `joiner ${i} at (${p.x}, ${p.z})`);
         assertClear(p, `joiner ${i}`);
       });
     });
@@ -256,7 +268,7 @@ describe("MyRoom", () => {
       const { player, move, place } = await setup();
       place(-5, -8.5);
       await move(1, 1, 10);
-      assert.ok(Math.abs(player.x - (-5 + 10 * SPEED)) < 1e-9, `x ${player.x}`);
+      assert.ok(Math.abs(player.x - (-5 + 10 * DIAG)) < 1e-9, `x ${player.x}`);
       assert.ok(Math.abs(player.z - -8.5) < FACE_EPS);
     });
 
@@ -286,18 +298,19 @@ describe("MyRoom", () => {
         const d = 1.5;
         // The doorway's walking axis is the one where both sides are clear.
         const alongZ = !overlapsAny(entrance.x, entrance.z - d, SOLIDS) && !overlapsAny(entrance.x, entrance.z + d, SOLIDS);
-        const steps = Math.round((2 * d) / SPEED);
+        const steps = Math.round((2 * d) / G);
+        const far = -d + steps * G;
         if (alongZ) {
           place(entrance.x, entrance.z - d);
           await move(0, 1, steps);
-          assert.ok(Math.abs(player.z - (entrance.z + d)) < 1e-9, `${entrance.id}: z ${player.z}`);
+          assert.ok(Math.abs(player.z - (entrance.z + far)) < 1e-9, `${entrance.id}: z ${player.z}`);
           await move(0, -1, steps);
           assert.ok(Math.abs(player.z - (entrance.z - d)) < 1e-9, `${entrance.id}: z ${player.z}`);
           assert.strictEqual(player.x, entrance.x);
         } else {
           place(entrance.x - d, entrance.z);
           await move(1, 0, steps);
-          assert.ok(Math.abs(player.x - (entrance.x + d)) < 1e-9, `${entrance.id}: x ${player.x}`);
+          assert.ok(Math.abs(player.x - (entrance.x + far)) < 1e-9, `${entrance.id}: x ${player.x}`);
           await move(-1, 0, steps);
           assert.ok(Math.abs(player.x - (entrance.x - d)) < 1e-9, `${entrance.id}: x ${player.x}`);
           assert.strictEqual(player.z, entrance.z);

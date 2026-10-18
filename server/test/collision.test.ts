@@ -1,17 +1,17 @@
 import assert from "assert";
 
 import { GRAYBOX_MAP, PLAYER_HALF_SIZE, PLAYER_HEIGHT, type Solid } from "../../shared/map.js";
-import { SPEED, BOUND } from "../src/rooms/MyRoom.js";
+import { SPEED, BOUND, TEAM_STEP } from "../src/rooms/MyRoom.js";
 import { SOLIDS, FACE_EPS, solid, inRect, assertClear } from "./mapHelpers.js";
 import { groundSolids, overlapsAny, overlapsSolid, resolveMove } from "../src/rules/collision.js";
-import { randomSpawnPoint, spawnAreaForJoin } from "../src/rules/spawn.js";
+import { randomSpawnPoint } from "../src/rules/spawn.js";
 
 const BOUNDS = GRAYBOX_MAP.bounds;
 
 /**
  * How far a player must be able to walk from any spawn point in +x, +z and -x
  * without being blocked. Tests/ rely on it: the two-tab test walks more than
- * 0.3 in +x and +z, and the integration tests move one SPEED in +x, +z and -x.
+ * 0.3 in +x and +z, and the integration tests move one team step in +x, +z and -x.
  */
 const SPAWN_WALK_CLEARANCE = 0.5;
 
@@ -136,10 +136,6 @@ describe("collision rules (pure)", () => {
 });
 
 describe("spawn rules (pure)", () => {
-  it("alternates ghost and warden spawn areas by join order", () => {
-    assert.deepStrictEqual([0, 1, 2, 3].map(spawnAreaForJoin), ["ghost", "warden", "ghost", "warden"]);
-  });
-
   it("1000 spawns per area are all inside the area and clear of solids", () => {
     for (const name of ["ghost", "warden"] as const) {
       const area = GRAYBOX_MAP.spawnAreas[name];
@@ -179,7 +175,8 @@ describe("spawn rules (pure)", () => {
       for (let i = 0; i <= n; i++) {
         for (let j = 0; j <= n; j++) {
           const p = { x: area.minX + (i / n) * (area.maxX - area.minX), z: area.minZ + (j / n) * (area.maxZ - area.minZ) };
-          for (const [dx, dz] of [[SPEED, 0], [0, SPEED], [-SPEED, 0]]) {
+          const st = TEAM_STEP[name as keyof typeof TEAM_STEP];
+          for (const [dx, dz] of [[st, 0], [0, st], [-st, 0]]) {
             const q = resolveMove(p, dx, dz, SOLIDS, BOUNDS);
             assert.ok(Math.abs(q.x - (p.x + dx)) < 1e-12 && Math.abs(q.z - (p.z + dz)) < 1e-12, `${name} (${p.x}, ${p.z}) one move blocked`);
           }

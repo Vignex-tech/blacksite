@@ -1,4 +1,5 @@
-// Spawn rules: which spawn area a joiner uses and where in it they appear.
+// Spawn rules: where in a team's spawn area a joiner appears. The area is
+// GRAYBOX_MAP.spawnAreas[team]; the team comes from rules/teams.ts.
 // Pure functions with no Colyseus dependency.
 
 import type { Rect, Solid, SpawnAreas } from "../../../shared/map.js";
@@ -9,15 +10,6 @@ export type SpawnAreaName = keyof SpawnAreas;
 
 /** Random points tried before falling back to the area's centre. */
 export const SPAWN_ATTEMPTS = 50;
-
-/**
- * The spawn area for the `joinIndex`-th joiner (0-based). Until teams exist
- * (milestone 3), joiners alternate ghost, warden, ghost, ... by join order.
- * When teams arrive, replace this with a lookup by the player's team.
- */
-export function spawnAreaForJoin(joinIndex: number): SpawnAreaName {
-  return joinIndex % 2 === 0 ? "ghost" : "warden";
-}
 
 /**
  * A random point inside `area` whose player box does not overlap any solid.
