@@ -31,5 +31,8 @@ Nobody owns `server/` yet. A server-engineer agent will be added once the client
 5. Pair each gameplay issue with a qa-build issue that verifies it, and list the gameplay issue under its **Depends on**.
 6. Finish with a hand-off table: issue number, title, agent, depends on. The main session uses that table to launch each agent with its issue number.
 
+## Definition of done
+No issue is done until the CI workflow (`.github/workflows/ci.yml`) passes on the commit that delivers it. Check with `gh run list --commit <sha>`. Reopen any issue that was closed while its CI run was red or missing.
+
 ## Reporting
 Agents report back by committing to the repo. Check progress with `git log`, `gh issue list` and `gh issue view <n> --comments`. Commit your own changes in `Docs/` and `Manifests/` with `git add Docs Manifests` only, using a message like `docs: ... (refs #N)`. Then run `git pull --rebase` and `git push`.

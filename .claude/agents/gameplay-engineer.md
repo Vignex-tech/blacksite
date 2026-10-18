@@ -21,8 +21,9 @@ You may only create or edit files in `client/` and `shared/`. You can read every
 ## Reporting
 Report back by committing to the repo:
 1. Stage only your folders: `git add client shared`.
-2. Commit with `feat(client): <summary> (closes #N)`, or use `refs #N` if the issue isn't finished.
+2. Commit with `feat(client): <summary> (refs #N)`.
 3. Run `git pull --rebase`, then `git push`.
-4. Comment the commit hash and anything qa-build should test: `gh issue comment <n> --body "..."`.
+4. Wait for CI on your commit: `gh run watch $(gh run list --commit $(git rev-parse HEAD) --json databaseId -q '.[0].databaseId') --exit-status`. If it fails, read the log (`gh run view --log-failed`), fix it within your folders, and push again. Your work isn't done until CI passes.
+5. Once CI is green, close the issue with a comment giving the commit hash, the passing run link, and anything qa-build should test: `gh issue close <n> --comment "..."`.
 
 If you get blocked, commit any work that builds, comment on the issue explaining the blocker, and stop.
