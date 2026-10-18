@@ -4,7 +4,7 @@ Written 2026-10-18 by the director. Phase 1 ends at the graybox gate in `CLAUDE.
 
 > Two players on different devices join a room over the tunnel link, play Ghost and Warden with basic movement, climbing, weapon damage and one hackable terminal, and finish a timed round.
 
-Milestones #1 (two tabs join one room and see each other move) and #9 (graybox map, server collision, test hook) are done. The milestones below run in order. Each one starts with its `shared/` contract and its server-authority work, because the server decides everything (rule 1). The client renders and sends inputs; qa-build verifies each piece before the next one starts. Only the next milestone has GitHub issues; later ones are filed when the one before passes its gate.
+Milestones #1 (two tabs join one room and see each other move), #9 (graybox map, server collision, test hook) and #17 (teams, per-team speed and cameras) are done. The milestones below run in order. Each one starts with its `shared/` contract and its server-authority work, because the server decides everything (rule 1). The client renders and sends inputs; qa-build verifies each piece before the next one starts. Only the next milestone has GitHub issues; later ones are filed when the one before passes its gate.
 
 ## Milestones
 
@@ -13,7 +13,8 @@ Milestones #1 (two tabs join one room and see each other move) and #9 (graybox m
 - **Agents:** gameplay-engineer (map contract #10, test hook #11, map rendering #14), server-engineer (collision and spawn areas #13), qa-build (#12, #15, #16).
 - **Gate:** the server never lets a player overlap a solid, players slide along walls and use every entrance, players spawn in spawn areas, each tab renders every solid, and the two-tab test no longer depends on colours or the camera. CI green.
 
-### Milestone 3: teams, spawns and cameras (tracking issue #17)
+### Milestone 3: teams, spawns and cameras (tracking issue #17, done, CI green on 5c10c44)
+- **Status:** done. Issues #18 to #25 are closed with green CI (commits 79c93e6, 68360fd, edf41ec, 03b8ebc, dd9b8f7, c8aee4e, 1c196e8, e63260b, 225756d, a959f86, 5c10c44). Follow-ups are in `Docs/backlog.md`; the current state is in `Docs/handoff.md`.
 - **Goal:** the server assigns each joiner a team, and each team gets its own camera and its own speed.
 - **Contract (#18, `shared/protocol.js`):** `TEAMS` (`ghost`, `warden`, equal to the map's spawn area keys), `MAX_TEAM_SIZE` 4, `TEAM_SPEED` in units/s (proposed Ghost 2.4, Warden 2.0), `team` and `yaw` in player state, and `move { dx, dz, yaw? }` as camera-relative intent. `dx` is strafe and `dz` forward, and yaw 0 faces +z with positive yaw turning toward +x (Babylon's `rotation.y`). A missing yaw keeps the player's current one, so with yaw 0 the M2 meaning (W is +z, D is +x) still holds. A yaw-only move turns the player.
 - **Server authority (#20):** teams are assigned from the players currently in the room (fewer players wins, ties go to ghost, join options ignored, up to 4v4, no rebalancing on leave). This replaces `spawnAreaForJoin`, whose join counter never went down. Spawns use `spawnAreas[team]` with yaw 0. Yaw must be finite (otherwise the message is ignored) and is wrapped to -pi..pi. The intent is clamped, its length capped at 1, rotated by yaw and scaled by the team's step (`TEAM_SPEED / MOVE_RATE_HZ`). The rate limit (turning included) and collision are unchanged.
