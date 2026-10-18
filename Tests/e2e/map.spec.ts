@@ -71,8 +71,12 @@ test('each tab renders every solid of the shared map; screenshot for review', as
     await joined(a.page, 2)
     await joined(b.page, 2)
 
+    // Version-1 fields matched, not compared exactly, so fields added in
+    // version 1 don't fail this.
     for (const { page } of [a, b]) {
-      expect((await snap(page)).map).toEqual(EXPECTED_MAP)
+      const s = await snap(page)
+      expect(s.version).toBe(1)
+      expect(s.map).toMatchObject(EXPECTED_MAP)
     }
     expect(EXPECTED_MAP).toEqual({ id: 'graybox-1', renderedSolids: 16 })
 

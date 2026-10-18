@@ -2,7 +2,11 @@ import { expect, test } from '@playwright/test'
 import { Client, type Room } from '@colyseus/sdk'
 import { MOVE_MESSAGE, ROOM_NAME, type GameRoomState, type PlayerState } from '../../shared/protocol.js'
 // Built server constants (server/build exists: Playwright's webServer runs it).
-import { BOUND, MOVE_BURST, SPEED } from '../../server/build/rooms/MyRoom.js'
+import { BOUND, MOVE_BURST } from '../../server/build/rooms/MyRoom.js'
+// Per-player step and #18's world-step formula (support/intent.ts), so these
+// tests pass with today's single SPEED and with #20's per-team speed, capped
+// diagonals and yaw.
+import { allowedSteps, stepFor, worldStep, yawOf, type Vec } from './support/movement.js'
 // Map data and player size come from shared/map.js (via support/geometry.ts).
 import {
   GRAYBOX_MAP,
@@ -34,7 +38,21 @@ type GameRoom = Room<any, GameRoomState>
 function pos(room: GameRoom, sessionId: string): PlayerState {
   const p = room.state.players.get(sessionId)
   if (!p) throw new Error(`player ${sessionId} missing from ${room.sessionId}'s state`)
-  return { x: p.x, z: p.z }
+  const out: PlayerState = { x: p.x, z: p.z }
+  // team and yaw only when the server syncs them (#20).
+  if (p.team !== undefined) out.team = p.team
+  if (p.yaw !== undefined) out.yaw = p.yaw
+  return out
+}
+
+/** True if `to - from` equals one of `steps` on both axes (within EPS). */
+function movedByOneOf(from: Vec, to: Vec, steps: Vec[]): boolean {
+  return steps.some((d) => Math.abs(to.x - from.x - d.x) < EPS && Math.abs(to.z - from.z - d.z) < EPS)
+}
+
+/** Fails unless the player faces +z (yaw 0, or no yaw field yet), so dx is +x and dz is +z. */
+function expectFacingPlusZ(p: PlayerState, who: string) {
+  expect(Math.abs(yawOf(p)), `${who} faces +z (yaw ${p.yaw})`).toBeLessThan(EPS)
 }
 
 /** Resolves once `predicate(room.state)` holds, checking now and on every state change. */
@@ -84,8 +102,8 @@ test('two clients join the same room, each sees 2 players keyed by sessionId, sp
   expect(a.roomId).toBe(b.roomId)
   expect(a.sessionId).not.toBe(b.sessionId)
 
-  // #13: the 1st joiner (A, the creator) spawns in the ghost area, the 2nd
-  // (B) in the warden area, clear of every solid.
+  // Balanced teams, ties to ghost: the 1st joiner (A, the creator) spawns in
+  // the ghost area, the 2nd (B) in the warden area, clear of every solid.
   const expected: [string, keyof typeof GRAYBOX_MAP.spawnAreas][] = [
     [a.sessionId, 'ghost'],
     [b.sessionId, 'warden'],
@@ -95,6 +113,7 @@ test('two clients join the same room, each sees 2 players keyed by sessionId, sp
       const p = pos(room, id)
       expect(Number.isFinite(p.x) && Number.isFinite(p.z)).toBe(true)
       expect(inRect(p, GRAYBOX_MAP.spawnAreas[area]), `${id} at ${p.x},${p.z} is in the ${area} area`).toBe(true)
+      if (p.team !== undefined) expect(p.team, `${id}'s team`).toBe(area)
       expect(overlapping(p).map((s) => s.id), `${id} overlaps no solid`).toEqual([])
       expect(Math.abs(p.x)).toBeLessThanOrEqual(BOUND + EPS)
       expect(Math.abs(p.z)).toBeLessThanOrEqual(BOUND + EPS)
@@ -107,18 +126,23 @@ test('two clients join the same room, each sees 2 players keyed by sessionId, sp
   }
 })
 
-test("A's move { dx: 1, dz: 0 } moves A by SPEED on x as seen by B, and not B", async () => {
+test("A's move { dx: 1, dz: 0 } moves A one step to its right as seen by B, and not B", async () => {
   const { a, b } = await joinPair()
   open.push(a, b)
   const a0 = pos(b, a.sessionId)
   const b0 = pos(b, b.sessionId)
+  // One step along A's right for A's yaw (0 if absent) and team (support/intent.ts).
+  const d = worldStep(1, 0, yawOf(a0), stepFor(a0))
 
   a.send(MOVE_MESSAGE, { dx: 1, dz: 0 })
-  await waitForState(b, "B sees A's x change", () => Math.abs(pos(b, a.sessionId).x - a0.x) > EPS)
+  await waitForState(b, "B sees A move", () => {
+    const p = pos(b, a.sessionId)
+    return Math.abs(p.x - a0.x) > EPS || Math.abs(p.z - a0.z) > EPS
+  })
 
   const a1 = pos(b, a.sessionId)
-  expect(Math.abs(a1.x - (a0.x + SPEED))).toBeLessThan(EPS)
-  expect(Math.abs(a1.z - a0.z)).toBeLessThan(EPS)
+  expect(Math.abs(a1.x - (a0.x + d.x)), `x ${a1.x}, expected ${a0.x + d.x}`).toBeLessThan(EPS)
+  expect(Math.abs(a1.z - (a0.z + d.z)), `z ${a1.z}, expected ${a0.z + d.z}`).toBeLessThan(EPS)
   const b1 = pos(b, b.sessionId)
   expect(Math.abs(b1.x - b0.x)).toBeLessThan(EPS)
   expect(Math.abs(b1.z - b0.z)).toBeLessThan(EPS)
@@ -130,25 +154,33 @@ test('malformed and out-of-range moves do not move A or disconnect it', async ()
   let aLeft: number | undefined
   a.onLeave((code) => (aLeft = code))
   const a0 = pos(b, a.sessionId)
+  const yaw = yawOf(a0)
+  const step = stepFor(a0)
+  // The sentinel is a forward move; with yaw 0 that is +z only.
+  expectFacingPlusZ(a0, 'A')
 
   for (const payload of [{ dx: 'x' }, { dx: 'x', dz: 1 }, { dx: 1, dz: null }, {}, 'move', 42, [1, 1], null]) {
     a.send(MOVE_MESSAGE, payload as never)
   }
   // Messages from one client are handled in order. This sentinel moves only z,
   // so once B sees it, every malformed message above has been handled too.
-  // x must be unchanged and z must have moved by exactly one SPEED.
+  // x must be unchanged and z must have moved by exactly one step.
   a.send(MOVE_MESSAGE, { dx: 0, dz: 1 })
   await waitForState(b, "B sees A's sentinel z move", () => Math.abs(pos(b, a.sessionId).z - a0.z) > EPS)
 
   let a1 = pos(b, a.sessionId)
-  expect(Math.abs(a1.x - a0.x)).toBeLessThan(EPS)
-  expect(Math.abs(a1.z - (a0.z + SPEED))).toBeLessThan(EPS)
+  const fwd = worldStep(0, 1, yaw, step)
+  expect(Math.abs(a1.x - (a0.x + fwd.x))).toBeLessThan(EPS)
+  expect(Math.abs(a1.z - (a0.z + fwd.z))).toBeLessThan(EPS)
 
-  // Out-of-range input is clamped to -1..1: at most SPEED per message.
+  // Out-of-range input is clamped to -1..1: at most one step per message.
+  const a2 = a1
+  const left = worldStep(-1000, 0, yaw, step)
   a.send(MOVE_MESSAGE, { dx: -1000, dz: 0 })
-  await waitForState(b, "B sees A's clamped x move", () => Math.abs(pos(b, a.sessionId).x - a0.x) > EPS)
+  await waitForState(b, "B sees A's clamped x move", () => Math.abs(pos(b, a.sessionId).x - a2.x) > EPS)
   a1 = pos(b, a.sessionId)
-  expect(Math.abs(a1.x - (a0.x - SPEED))).toBeLessThan(EPS)
+  expect(Math.abs(a1.x - (a2.x + left.x))).toBeLessThan(EPS)
+  expect(Math.abs(a1.z - (a2.z + left.z))).toBeLessThan(EPS)
   expect(Math.abs(a1.x)).toBeLessThanOrEqual(BOUND)
 
   expect(a.connection.isOpen).toBe(true)
@@ -215,6 +247,16 @@ class Walker {
     return pos(this.room, this.room.sessionId)
   }
 
+  /** This client's own synced player state (with team and yaw once #20 sends them). */
+  get state(): PlayerState {
+    return pos(this.room, this.room.sessionId)
+  }
+
+  /** Step per accepted move at full input for this player (support/movement.ts). */
+  get stepSize(): number {
+    return stepFor(this.state)
+  }
+
   /** Sends one move; resolves with the new position once synced, or the old one if blocked. */
   async step(dx: number, dz: number): Promise<{ moved: boolean; at: Point }> {
     const wait = this.lastSend + PACE_MS - Date.now()
@@ -243,8 +285,15 @@ class Walker {
    * it lands on it exactly), one axis at a time in `order`, or both at once
    * with 'both' (only where the bounding rectangle is clear). Fails if the
    * player gets stuck on the way.
+   *
+   * The input is world-aligned, so the player must face +z (yaw 0, or no yaw
+   * yet; nothing here sends a yaw). The step comes from the player's team.
+   * With #20's capped intent a 'both' leg still points at the target, so it
+   * stays in the bounding rectangle and converges, only in more steps.
    */
   async walkTo(target: Point, order: 'xz' | 'zx' | 'both' = 'xz'): Promise<Point> {
+    expectFacingPlusZ(this.state, this.name)
+    const step = this.stepSize
     const legs: ('x' | 'z' | 'both')[] = order === 'both' ? ['both'] : order === 'xz' ? ['x', 'z'] : ['z', 'x']
     for (const leg of legs) {
       let stuck = 0
@@ -254,8 +303,8 @@ class Walker {
         const ez = leg === 'x' ? 0 : target.z - p.z
         if (Math.abs(ex) < ARRIVE && Math.abs(ez) < ARRIVE) break
         const r = await this.step(
-          Math.abs(ex) < ARRIVE ? 0 : clampUnit(ex / SPEED),
-          Math.abs(ez) < ARRIVE ? 0 : clampUnit(ez / SPEED),
+          Math.abs(ex) < ARRIVE ? 0 : clampUnit(ex / step),
+          Math.abs(ez) < ARRIVE ? 0 : clampUnit(ez / step),
         )
         stuck = r.moved ? 0 : stuck + 1
         if (stuck >= STUCK_STEPS) {
@@ -298,13 +347,17 @@ async function joinInOrder(n: number): Promise<GameRoom[]> {
   return rooms
 }
 
-/** #13's rule until teams exist (milestone 3): areas alternate by join order. */
+/**
+ * Balanced teams, ties to ghost: in a fresh room joiners 1 and 3 are ghosts
+ * and 2 and 4 wardens. Holds for #13's alternation by join order (today) and
+ * for #20's team balance, as long as nobody leaves in between.
+ */
 const SPAWN_AREA_BY_JOIN = ['ghost', 'warden', 'ghost', 'warden'] as const
 
 /** z just below the lowest solid, with half a unit to spare: everything south of it is open. */
 const BELOW_SOLIDS_Z = Math.min(...GRAYBOX_MAP.solids.map((s) => s.min.z)) - PLAYER_HALF_SIZE - 0.5
 
-test('joiners alternate ghost, warden, ghost, warden spawn areas, clear of solids (5 fresh rooms)', async () => {
+test('balanced teams, ties to ghost: joiners 1 and 3 spawn in the ghost area, 2 and 4 in the warden area, clear of solids (5 fresh rooms)', async () => {
   test.setTimeout(60_000)
   for (let round = 0; round < 5; round++) {
     const rooms = await joinInOrder(4)
@@ -316,6 +369,7 @@ test('joiners alternate ghost, warden, ghost, warden spawn areas, clear of solid
           true,
         )
         expect(overlapping(p).map((s) => s.id), `joiner ${i + 1} overlaps no solid`).toEqual([])
+        if (p.team !== undefined) expect(p.team, `joiner ${i + 1}'s team`).toBe(area)
       })
     }
     await Promise.all(open.splice(0).map((r) => r.leave().catch(() => {})))
@@ -341,24 +395,36 @@ test('walking into a wall stops flush with its face, a forged huge dz still stop
 
   // Back off half a step, then a forged huge dz: moves the remaining half
   // step, flush with the face, and never further (no tunnelling).
-  await g.walkTo({ x, z: face - SPEED / 2 })
+  const step = g.stepSize
+  await g.walkTo({ x, z: face - step / 2 })
   let r = await g.step(0, 1e9)
   expect(r.moved).toBe(true)
   expect(Math.abs(r.at.z - face)).toBeLessThan(EPS)
   r = await g.step(0, 1e9)
   expect(Math.abs(r.at.z - face)).toBeLessThan(EPS)
   const atFace = r.at
+  // A forged huge diagonal into the wall clamps to (1, 1). x slides one
+  // clamped step: a full step today (no cap), step / sqrt(2) once #20 caps the
+  // intent's length at 1. Either way more than 0 and at most one step, and z
+  // stays flush with the face.
+  /** The x slide of a (dx, +1) move along the wall, uncapped and capped. */
+  const slides = (dx: number) => allowedSteps(dx, 1, 0, step).map((d) => ({ x: d.x, z: 0 }))
+  const expectSlide = (from: Point, to: Point, dx: number, what: string) => {
+    const slid = Math.abs(to.x - from.x)
+    expect(slid, `${what} slides more than 0`).toBeGreaterThan(EPS)
+    expect(slid, `${what} slides at most one step`).toBeLessThanOrEqual(step + EPS)
+    expect(movedByOneOf(from, { x: to.x, z: from.z }, slides(dx)), `${what} slid ${to.x - from.x}`).toBe(true)
+    expect(Math.abs(to.z - face), `${what} stays flush with the wall`).toBeLessThan(EPS)
+  }
   r = await g.step(1e9, 1e9)
-  expect(Math.abs(r.at.x - (atFace.x + SPEED)), 'a forged huge dx moves exactly SPEED').toBeLessThan(EPS)
-  expect(Math.abs(r.at.z - face)).toBeLessThan(EPS)
+  expectSlide(atFace, r.at, 1, 'a forged huge diagonal')
 
-  // Diagonal (-x, +z) along the wall: x moves a full SPEED per move, z stays flush.
+  // Diagonal (-x, +z) along the wall: x slides one clamped step per move, z stays flush.
   let from = r.at
   for (let i = 0; i < 10; i++) {
     r = await g.step(-1, 1)
     expect(r.moved).toBe(true)
-    expect(Math.abs(r.at.x - (from.x - SPEED)), 'slides a full SPEED along the wall').toBeLessThan(EPS)
-    expect(Math.abs(r.at.z - face), 'stays flush with the wall').toBeLessThan(EPS)
+    expectSlide(from, r.at, -1, `diagonal move ${i + 1}`)
     from = r.at
   }
 
@@ -456,6 +522,8 @@ test('a flood of back-to-back moves is rate limited to the MOVE_BURST budget', a
   const [ghostRoom] = await joinInOrder(1)
   const g = new Walker(ghostRoom, 'ghost')
   const p0 = g.pos
+  expectFacingPlusZ(g.state, 'ghost')
+  const step = g.stepSize
   // Open space: the ghost area and a few steps east of it are clear.
   for (let i = 0; i < 20; i++) ghostRoom.send(MOVE_MESSAGE, { dx: 1, dz: 0 })
   // Messages are handled in order: once a z-only sentinel lands, the whole
@@ -464,8 +532,8 @@ test('a flood of back-to-back moves is rate limited to the MOVE_BURST budget', a
   for (let i = 0; i < 20 && Math.abs(r.at.z - p0.z) < EPS; i++) r = await g.step(0, -1)
   expect(Math.abs(r.at.z - p0.z), 'a sentinel move landed').toBeGreaterThan(EPS)
   const moved = r.at.x - p0.x
-  expect(moved, `flood moved ${moved}`).toBeGreaterThanOrEqual(MOVE_BURST * SPEED - EPS)
+  expect(moved, `flood moved ${moved}`).toBeGreaterThanOrEqual(MOVE_BURST * step - EPS)
   // At most one extra token can refill while the flood is in flight.
-  expect(moved, `flood moved ${moved}`).toBeLessThanOrEqual((MOVE_BURST + 1) * SPEED + EPS)
+  expect(moved, `flood moved ${moved}`).toBeLessThanOrEqual((MOVE_BURST + 1) * step + EPS)
   expect(g.violations).toEqual([])
 })

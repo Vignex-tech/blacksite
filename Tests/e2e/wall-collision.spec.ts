@@ -2,6 +2,7 @@ import { expect, test, type Browser, type Page } from '@playwright/test'
 import type { BlacksitePlayerSnapshot, BlacksiteSnapshot } from '../../shared/testhook.js'
 import { BOUND } from '../../server/build/rooms/MyRoom.js'
 import { overlapping, stopAlongZ } from './support/geometry.js'
+import { yawOf } from './support/intent.js'
 
 // #15: in the browser, holding a key toward a wall stops the local player
 // flush with the wall, as seen in both tabs. State is read only through
@@ -11,6 +12,11 @@ import { overlapping, stopAlongZ } from './support/geometry.js'
 // Where the wall is depends on where the server spawned the player, so the
 // expected stop is computed from shared/map.js (support/geometry.ts) for the
 // player's actual spawn point rather than assumed from join order.
+//
+// Camera-relative movement (#18): W is +z only while the local player faces
+// +z (yaw 0). This test never moves the mouse or clicks the canvas, and checks
+// the snapshot's yaw is 0 (when the field exists) before pressing W. The stop
+// position doesn't depend on the team's speed.
 
 const VIEWPORT = { width: 800, height: 600 }
 /** Upper bound for short waits. A failure, never a delay. */
@@ -75,6 +81,11 @@ test('holding W toward a wall stops the local player at the wall face, as seen i
         if (hit.length) seen.push(`${s.sessionId} saw ${p.id} at ${p.x},${p.z} overlap ${hit.map((h) => h.id).join(',')}`)
       }
     }
+
+    // Precondition for "W is +z": A faces +z (yaw 0, or no yaw field yet).
+    const yaw = (start as { yaw?: unknown }).yaw
+    if (yaw !== undefined) expect(typeof yaw, 'yaw is a number when present').toBe('number')
+    expect(Math.abs(yawOf({ yaw })), `A faces +z (yaw ${String(yaw)})`).toBeLessThan(EPS)
 
     await a.keyboard.down('KeyW')
     try {

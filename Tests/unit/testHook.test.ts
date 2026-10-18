@@ -4,6 +4,10 @@ import type { BlacksiteTestHook } from '../../shared/testhook.js'
 
 // Unit checks of the client test hook (#11), verified in #12. The browser side
 // is covered by Tests/e2e/two-players.spec.ts.
+//
+// Snapshots are checked with toMatchObject on the version-1 fields (arrays
+// still match length and order), because fields may be added in version 1
+// (#22 adds team and yaw). `version` itself is still checked to be 1.
 
 /** A fresh stand-in for `window` (the real one can only take the hook once). */
 function setup() {
@@ -17,7 +21,7 @@ function setup() {
 describe('window.__blacksite test hook', () => {
   it('starts disconnected with no players and no map', () => {
     const { hook } = setup()
-    expect(hook.snapshot()).toEqual({
+    expect(hook.snapshot()).toMatchObject({
       version: 1,
       connected: false,
       sessionId: null,
@@ -38,7 +42,7 @@ describe('window.__blacksite test hook', () => {
     const s = hook.snapshot()
     expect(s.connected).toBe(true)
     expect(s.sessionId).toBe('b')
-    expect(s.players).toEqual([
+    expect(s.players).toMatchObject([
       { id: 'a', x: 3, z: 4, isLocal: false },
       { id: 'b', x: 0.1, z: 0.2, isLocal: true },
       { id: 'c', x: 1.5, z: -2, isLocal: false },
@@ -64,7 +68,7 @@ describe('window.__blacksite test hook', () => {
     first.map.renderedSolids = 5
     const next = hook.snapshot()
     expect(next).not.toBe(first)
-    expect(next).toEqual({
+    expect(next).toMatchObject({
       version: 1,
       connected: true,
       sessionId: 'a',

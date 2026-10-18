@@ -1,5 +1,6 @@
 import { expect, test, type Browser, type Page } from '@playwright/test'
 import type { BlacksitePlayerSnapshot, BlacksiteSnapshot } from '../../shared/testhook.js'
+import { yawOf } from './support/intent.js'
 
 // Milestone #1 (issue #5), moved onto the client test hook in #12: two browser
 // tabs join the shared room and each sees the other player move.
@@ -13,6 +14,11 @@ import type { BlacksitePlayerSnapshot, BlacksiteSnapshot } from '../../shared/te
 // Movement thresholds are small (MOVE_UNITS) so a held key can't carry a
 // player from any spawn point into a wall before the key is released.
 //
+// Camera-relative movement (#18): D is +x and W is +z only while the local
+// player faces +z (yaw 0). These tests never move the mouse or click the
+// canvas, so nothing turns the camera, and before each key press they check
+// that the snapshot's yaw is 0 when the field exists (#22 adds it).
+//
 // Pages joinOrCreate the shared `my_room`, so the browser specs run on a
 // single worker (playwright.config.ts) and no other spec's page can join.
 
@@ -21,7 +27,7 @@ const VIEWPORT = { width: 800, height: 600 }
 const WAIT_MS = 10_000
 /** Synced numbers are float32 on the wire; the same value in two tabs agrees within this. */
 const EPS = 1e-4
-/** How far a held key must move A (world units; SPEED is 0.1 per move, about 20 moves/s). */
+/** How far a held key must move A (world units; 0.1 to 0.12 per move by team, about 20 moves/s). */
 const MOVE_UNITS = 0.3
 /** Short, fixed poll intervals so a held key is released soon after the goal is reached. */
 const FAST_POLL = { intervals: [50], timeout: WAIT_MS }
@@ -95,8 +101,25 @@ async function settle(a: Page, b: Page, ids: string[]): Promise<{ a: BlacksiteSn
   return last!
 }
 
-/** Holds `key` in `page` until `done(snapshot of page)` holds, then releases it. */
+/**
+ * The local player faces +z: its snapshot yaw is 0, or the field doesn't exist
+ * yet. A checked precondition for "W is +z, D is +x".
+ */
+async function expectLocalFacingPlusZ(page: Page) {
+  const s = await snap(page)
+  const local = s.players.find((p) => p.isLocal)
+  expect(local, `${s.sessionId} has a local player`).toBeDefined()
+  const yaw = (local as { yaw?: unknown }).yaw
+  expect(Math.abs(yawOf({ yaw })), `local player faces +z (yaw ${String(yaw)})`).toBeLessThan(EPS)
+  if (yaw !== undefined) expect(typeof yaw, 'yaw is a number when present').toBe('number')
+}
+
+/**
+ * Holds `key` in `page` until `done(snapshot of page)` holds, then releases it.
+ * First checks that the local player faces +z, so the key's world direction is known.
+ */
 async function holdUntil(page: Page, key: string, what: string, done: (s: BlacksiteSnapshot) => boolean) {
+  await expectLocalFacingPlusZ(page)
   await page.keyboard.down(key)
   try {
     await expect.poll(async () => done(await snap(page)), { message: what, ...FAST_POLL }).toBe(true)
@@ -119,9 +142,18 @@ test('test hook: snapshot shape, one local player, and a copy per call', async (
       [b, idB],
     ] as const) {
       const s = await snap(page)
+      // Version-1 fields only: fields may be added in version 1 (#22 adds team
+      // and yaw), so the shape is matched, not compared exactly.
+      expect(s).toMatchObject({ version: 1, connected: true, sessionId: own })
       expect(s.version).toBe(1)
-      expect(s.connected).toBe(true)
-      expect(s.sessionId).toBe(own)
+      for (const p of s.players) {
+        expect(p).toMatchObject({
+          id: expect.any(String),
+          x: expect.any(Number),
+          z: expect.any(Number),
+          isLocal: expect.any(Boolean),
+        })
+      }
       // Both tabs know the same two players, sorted by id.
       expect(s.players.map((p) => p.id)).toEqual([idA, idB].sort())
       // Exactly one player is local, and it is this tab's sessionId.
