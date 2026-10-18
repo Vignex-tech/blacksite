@@ -111,12 +111,14 @@ describe('window.__blacksite test hook', () => {
     const s = hook.snapshot()
     expect(s.version).toBe(1)
     expect(s.localTeam).toBe('warden')
-    expect(s.players).toEqual([
+    // Matched, not compared exactly: fields may be added in version 1 (y and
+    // mode per player from #33, new map counts), so only these are pinned (#28).
+    expect(s.players).toMatchObject([
       { id: 'a', x: 1, z: 2, isLocal: false, team: 'ghost', yaw: 1.25 },
       { id: 'b', x: 3, z: 4, isLocal: true, team: 'warden', yaw: -Math.PI },
     ])
-    // Exactly the version-1 fields: nothing else leaks into the snapshot.
-    expect(Object.keys(s).sort()).toEqual(['connected', 'localTeam', 'map', 'players', 'sessionId', 'version'])
+    // The version-1 fields are all there.
+    expect(Object.keys(s)).toEqual(expect.arrayContaining(['connected', 'localTeam', 'map', 'players', 'sessionId', 'version']))
 
     // Turning and changing team show up in the next snapshot.
     view.upsertPlayer('a', 1, 2, false, { team: 'ghost', yaw: -0.5 })
@@ -138,7 +140,7 @@ describe('window.__blacksite test hook', () => {
     expect(hook.snapshot().localTeam).toBeNull()
     view.upsertPlayer('me', 0, 0, true)
     let s = hook.snapshot()
-    expect(s.players.find((p) => p.id === 'me')).toEqual({ id: 'me', x: 0, z: 0, isLocal: true, team: null, yaw: 0 })
+    expect(s.players.find((p) => p.id === 'me')).toMatchObject({ id: 'me', x: 0, z: 0, isLocal: true, team: null, yaw: 0 })
     expect(s.localTeam).toBeNull()
     view.upsertPlayer('me', 0, 0, true, { team: null, yaw: 0.3 })
     s = hook.snapshot()
@@ -162,7 +164,7 @@ describe('window.__blacksite test hook', () => {
     const next = hook.snapshot()
     expect(next.players).not.toBe(first.players)
     expect(next.players[0]).not.toBe(first.players[0])
-    expect(next).toEqual({
+    expect(next).toMatchObject({
       version: 1,
       connected: true,
       sessionId: 'a',

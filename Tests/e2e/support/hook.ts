@@ -7,6 +7,7 @@ import { expect } from '@playwright/test'
 import { TEAMS } from '../../../shared/protocol.js'
 import type { BlacksiteSnapshot } from '../../../shared/testhook.js'
 import { isTeam } from './intent.js'
+import { groundProblems, hazardsAt, type Placed } from './geometry.js'
 
 /** float32 on the wire. */
 const EPS = 1e-4
@@ -26,4 +27,18 @@ export function expectTeamsAndYaws(s: BlacksiteSnapshot): void {
   const local = s.players.filter((p) => p.isLocal)
   expect(local, `${who} has exactly one local player`).toHaveLength(1)
   expect(s.localTeam, `${who}: localTeam is the local player's team`).toBe(local[0].team)
+}
+
+/**
+ * Fails unless every player in `s` is on the ground: y 0 and mode 'ground'
+ * when the snapshot has them (from #33; missing means 0 and 'ground'), and
+ * outside the route hazards (ramps, covered pockets, climb spots). For specs
+ * whose players only walk on the ground (#28).
+ */
+export function expectOnGround(s: BlacksiteSnapshot): void {
+  const who = s.sessionId ?? 'a disconnected tab'
+  for (const p of s.players) {
+    expect(groundProblems(p as Placed), `${who} sees ${p.id} on the ground`).toEqual([])
+    expect(hazardsAt(p, 0), `${who} sees ${p.id} at ${p.x},${p.z} outside ramps, pockets and climb spots`).toEqual([])
+  }
 }

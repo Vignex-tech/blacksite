@@ -172,7 +172,8 @@ export async function turnTo(tab: Tab, target: number): Promise<number> {
 /** Per-sample local and watched player positions recorded inside the page. */
 export interface Sample {
   t: number
-  players: { id: string; x: number; z: number; yaw: number }[]
+  /** y and mode are copied only when the snapshot has them (from #33); missing means 0 and 'ground'. */
+  players: { id: string; x: number; z: number; yaw: number; y?: unknown; mode?: unknown }[]
 }
 
 /**
@@ -187,7 +188,13 @@ export async function startSampler(page: Page, everyMs = 10): Promise<() => Prom
     w.__qaSamples = []
     w.__qaTimer = window.setInterval(() => {
       const s = window.__blacksite.snapshot()
-      w.__qaSamples.push({ t: performance.now(), players: s.players.map((p) => ({ id: p.id, x: p.x, z: p.z, yaw: p.yaw })) })
+      w.__qaSamples.push({
+        t: performance.now(),
+        players: s.players.map((p) => {
+          const extra = p as { y?: unknown; mode?: unknown }
+          return { id: p.id, x: p.x, z: p.z, yaw: p.yaw, ...('y' in extra ? { y: extra.y } : {}), ...('mode' in extra ? { mode: extra.mode } : {}) }
+        }),
+      })
     }, ms)
   }, everyMs)
   return () =>

@@ -78,7 +78,8 @@ test('each tab renders every solid of the shared map; screenshot for review', as
     await joined(b.page, 2)
 
     // Version-1 fields matched, not compared exactly, so fields added in
-    // version 1 don't fail this.
+    // version 1 don't fail this: the map report may gain counts for floors,
+    // ramps or anchors (#33) and still pass, as long as renderedSolids is 16.
     for (const { page } of [a, b]) {
       const s = await snap(page)
       expect(s.version).toBe(1)
@@ -116,7 +117,7 @@ test('each tab renders every solid of the shared map; screenshot for review', as
       await expect(page.locator('#hud')).toContainText('offline')
       const s = await snap(page)
       expect(s.map).toMatchObject(EXPECTED_MAP)
-      expect(s.camera, 'a tab that never joined keeps the overhead camera').toEqual({ mode: 'overhead', yaw: 0 })
+      expect(s.camera, 'a tab that never joined keeps the overhead camera').toMatchObject({ mode: 'overhead', yaw: 0 })
       await frames(page, 10)
       const png = await page.screenshot({ path: SCREENSHOT })
       await testInfo.attach('graybox-map', { body: png, contentType: 'image/png' })

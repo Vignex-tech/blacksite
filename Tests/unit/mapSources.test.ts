@@ -3,7 +3,7 @@ import { readdirSync, readFileSync } from 'node:fs'
 import { join, relative } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
-import { GRAYBOX_MAP } from '../../shared/map.js'
+import { GRAYBOX_MAP, PLAYER_HALF_SIZE } from '../../shared/map.js'
 
 // Source checks for #16 (the "grep" criteria): the map layout lives only in
 // shared/map.js, client/ renders it from there, and shared/ stays free of
@@ -54,6 +54,41 @@ describe('client/ does not hard-code the map layout', () => {
     for (const p of [...GRAYBOX_MAP.entrances, ...GRAYBOX_MAP.terminals]) coords.add(Math.abs(p.x)).add(Math.abs(p.z))
     const fractional = [...coords].filter((v) => !Number.isInteger(v))
     expect(fractional.length).toBeGreaterThan(0)
+    const hits: string[] = []
+    for (const f of CLIENT) {
+      const nums = code(f.text).match(/(?<![\w.])\d+\.\d+(?![\w.])/g) ?? []
+      for (const n of nums) if (fractional.includes(Number(n))) hits.push(`${f.path}: ${n}`)
+    }
+    expect(hits).toEqual([])
+  })
+
+  // #28: the upper level (#27) too. Client code (#33) must read floors, ramps
+  // and anchors from GRAYBOX_MAP, never copy their ids or coordinates.
+  it('names no floor, ramp or anchor id', () => {
+    const ids = [
+      ...GRAYBOX_MAP.floors.map((f) => f.id),
+      ...GRAYBOX_MAP.ramps.map((r) => r.id),
+      ...GRAYBOX_MAP.anchors.map((a) => a.id),
+    ]
+    expect(ids.length).toBeGreaterThan(0)
+    const hits = CLIENT.flatMap((f) => ids.filter((id) => f.text.includes(id)).map((id) => `${f.path}: ${id}`))
+    expect(hits).toEqual([])
+  })
+
+  it('contains no coordinates that only the upper level uses', () => {
+    // Every distinct non-integer coordinate and height of the floors, ramps and
+    // anchors (5.75, 10.5, 2.8, 6.75, ...), except the player's half size
+    // (0.5), which client code legitimately uses for the player's box.
+    const coords = new Set<number>()
+    for (const f of GRAYBOX_MAP.floors) for (const v of [f.min.x, f.max.x, f.min.y, f.min.z, f.max.z]) coords.add(Math.abs(v))
+    for (const r of GRAYBOX_MAP.ramps) for (const v of [r.minX, r.maxX, r.minZ, r.maxZ]) coords.add(Math.abs(v))
+    for (const a of GRAYBOX_MAP.anchors) {
+      const vals = a.kind === 'climb' ? [a.x, a.z, a.minY, a.maxY] : [a.x0, a.z0, a.x1, a.z1]
+      for (const v of vals) coords.add(Math.abs(v))
+    }
+    coords.delete(PLAYER_HALF_SIZE)
+    const fractional = [...coords].filter((v) => !Number.isInteger(v))
+    expect(fractional).toEqual(expect.arrayContaining([5.75, 10.5, 2.8]))
     const hits: string[] = []
     for (const f of CLIENT) {
       const nums = code(f.text).match(/(?<![\w.])\d+\.\d+(?![\w.])/g) ?? []

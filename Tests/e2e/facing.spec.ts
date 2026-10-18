@@ -4,7 +4,7 @@ import { MOVE_MESSAGE, ROOM_NAME } from '../../shared/protocol.js'
 import type { BlacksitePlayerSnapshot, BlacksiteSnapshot } from '../../shared/testhook.js'
 import { endpoint, pos, waitForState, type GameRoom } from './support/sdk.js'
 import { angleDiff } from './support/intent.js'
-import { expectTeamsAndYaws } from './support/hook.js'
+import { expectOnGround, expectTeamsAndYaws } from './support/hook.js'
 
 // #23: a player that turns with a yaw-only move is seen with the new yaw by
 // the browser clients, and every tab's team and yaw match what the server
@@ -75,6 +75,7 @@ test('a yaw-only move from another client is seen in both tabs, and every team a
     // state (as the SDK client received it), and both tabs agree.
     for (const s of [sa, sb]) {
       expectTeamsAndYaws(s)
+      expectOnGround(s)
       for (const id of [idA, idB, idC]) {
         const server = pos(sdk, id)
         const seen = find(s, id)!
@@ -120,6 +121,7 @@ test('a yaw-only move from another client is seen in both tabs, and every team a
           .toBe(true)
         const s = await snap(page)
         expectTeamsAndYaws(s)
+        expectOnGround(s)
         const p = find(s, idC)!
         expect(Math.abs(p.x - start.x) + Math.abs(p.z - start.z), `${name}: the turn did not move it`).toBeLessThan(EPS)
         expect(p.team, `${name}: turning keeps the team`).toBe('ghost')

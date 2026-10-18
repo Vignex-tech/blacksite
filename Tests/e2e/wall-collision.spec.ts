@@ -1,10 +1,10 @@
 import { expect, test, type Browser, type Page } from '@playwright/test'
 import type { BlacksitePlayerSnapshot, BlacksiteSnapshot } from '../../shared/testhook.js'
 import { BOUND } from '../../server/build/rooms/MyRoom.js'
-import { PLAYER_HALF_SIZE, overlapping, solid, stopAlongZ } from './support/geometry.js'
+import { PLAYER_HALF_SIZE, groundProblems, overlapping, solid, stopAlongZ } from './support/geometry.js'
 import { TEAM_SPEED } from '../../shared/protocol.js'
 import { stepFor } from './support/movement.js'
-import { analyse, expectNoOverlap, pathClear, track } from './support/legs.js'
+import { analyse, expectGroundRoute, expectNoOverlap, pathClear, track } from './support/legs.js'
 import {
   closeTabs,
   turnTo,
@@ -94,7 +94,8 @@ test('holding W toward a wall stops the local player at the wall face, as seen i
     expect(overlapping(start).map((s) => s.id), 'A spawned clear of solids').toEqual([])
     // W is +z. The first solid face north of A's spawn (every spawn area has
     // one: the building's south wall or cover for ghosts, its north wall for
-    // wardens), with A's centre half a box short of it.
+    // wardens), with A's centre half a box short of it. stopAlongZ fails if
+    // the path meets a ramp, a covered pocket or a climb spot (#28).
     const face = stopAlongZ(start, 1, BOUND)
     expect(face, 'a solid, not the outer bound, is north of the spawn').toBeLessThan(BOUND - 1)
 
@@ -103,6 +104,7 @@ test('holding W toward a wall stops the local player at the wall face, as seen i
       for (const p of s.players) {
         const hit = overlapping(p)
         if (hit.length) seen.push(`${s.sessionId} saw ${p.id} at ${p.x},${p.z} overlap ${hit.map((h) => h.id).join(',')}`)
+        for (const g of groundProblems(p)) seen.push(`${s.sessionId} saw ${p.id} at ${p.x},${p.z} off the ground: ${g}`)
       }
     }
 
@@ -147,7 +149,7 @@ test('holding W toward a wall stops the local player at the wall face, as seen i
         { message: 'tab B sees A flush with the wall', timeout: WAIT_MS },
       )
       .toBe(true)
-    expect(seen, 'no tab ever saw a player overlap a solid').toEqual([])
+    expect(seen, 'no tab ever saw a player overlap a solid or leave the ground').toEqual([])
   } finally {
     await a.context().close()
     await b.context().close()
@@ -215,6 +217,8 @@ test('rotated: a ghost turned about 45 degrees walks into a wall and slides alon
     const samplesB = await stopB()
     expectNoOverlap(samplesA, 'tab A')
     expectNoOverlap(samplesB, 'tab B')
+    expectGroundRoute(samplesA, 'tab A')
+    expectGroundRoute(samplesB, 'tab B')
 
     const all = track(samplesA, me.id).points
     // Approach: a straight line along (sin yaw, cos yaw) up to the face.

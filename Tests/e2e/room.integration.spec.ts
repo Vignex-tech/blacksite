@@ -12,6 +12,7 @@ import {
   entrance,
   inRect,
   insideBuilding,
+  groundProblems,
   overlapping,
   solid,
   stopAlongZ,
@@ -69,6 +70,7 @@ test('two clients join the same room, each sees 2 players keyed by sessionId, sp
       expect(p.team, `${id}'s team`).toBe(area)
       expectFacingPlusZ(p, id)
       expect(overlapping(p).map((s) => s.id), `${id} overlaps no solid`).toEqual([])
+      expect(groundProblems(p), `${id} spawned on the ground`).toEqual([])
       expect(Math.abs(p.x)).toBeLessThanOrEqual(BOUND + EPS)
       expect(Math.abs(p.z)).toBeLessThanOrEqual(BOUND + EPS)
     }
@@ -171,6 +173,7 @@ test('balanced teams, ties to ghost: joiners 1 and 3 spawn in the ghost area, 2 
           true,
         )
         expect(overlapping(p).map((s) => s.id), `joiner ${i + 1} overlaps no solid`).toEqual([])
+        expect(groundProblems(p), `joiner ${i + 1} spawned on the ground`).toEqual([])
         expect(p.team, `joiner ${i + 1}'s team`).toBe(area)
         expectFacingPlusZ(p, `joiner ${i + 1}`)
       })
@@ -190,6 +193,7 @@ test('walking into a wall stops flush with its face, a forged huge dz still stop
   const wall = solid('wall-s-w')
   const { x } = await g.walkTo({ x: wall.max.x - 1.5, z: BELOW_SOLIDS_Z }, 'both')
   const face = wall.min.z - PLAYER_HALF_SIZE
+  // stopAlongZ also fails if the path north meets a ramp, a pocket or a climb spot.
   expect(stopAlongZ(g.pos, 1, BOUND), 'the first face north of this x is the wall').toBeCloseTo(face, 9)
 
   // Hold +z: stops with its centre half a box short of the face, x unchanged.
@@ -286,13 +290,18 @@ test('every entrance can be walked through both ways, an inner corner holds, and
       expect(Math.abs(at.x - corner.x), `corner x ${at.x}, expected ${corner.x}`).toBeLessThan(EPS)
       expect(Math.abs(at.z - corner.z), `corner z ${at.z}, expected ${corner.z}`).toBeLessThan(EPS)
     })(),
-    // Joiner 3, ghost: round the building's west side, in and out of the west door.
+    // Joiner 3, ghost: round the building's west side, in and out of the west
+    // door. The doorway opens under the mezzanine, next to the covered pocket
+    // and the foot of the stairs (#27), so the ghost goes through half a unit
+    // south of the doorway's centre line (still well inside the 3-wide gap)
+    // to keep ROUTE_MARGIN from them; walkTo checks every leg.
     (async () => {
       const d = entrance('door-west')
+      const z = d.z - 0.5
       await g3.walkTo({ x: d.x - OFF, z: BELOW_SOLIDS_Z }, 'both')
-      await through(g3, { x: d.x - OFF, z: d.z }, 'zx', false)
-      await through(g3, { x: d.x + OFF, z: d.z }, 'xz', true)
-      await through(g3, { x: d.x - OFF, z: d.z }, 'xz', false)
+      await through(g3, { x: d.x - OFF, z }, 'zx', false)
+      await through(g3, { x: d.x + OFF, z }, 'xz', true)
+      await through(g3, { x: d.x - OFF, z }, 'xz', false)
     })(),
     // Joiner 4, warden: north of the pillar, east of it, then out, in and out
     // of the east door, and +x to the bound.

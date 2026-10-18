@@ -4,7 +4,7 @@ import { MAX_TEAM_SIZE, MOVE_MESSAGE, ROOM_NAME, TEAMS, TEAM_SPEED, type Team } 
 // Built server constants (server/build exists: Playwright's webServer runs it).
 import { MAX_CLIENTS, MOVE_BURST, MOVE_RATE_HZ, TEAM_STEP } from '../../server/build/rooms/MyRoom.js'
 import { teamStep, worldStep, type Vec } from './support/movement.js'
-import { GRAYBOX_MAP, inRect, overlapping, solid, PLAYER_HALF_SIZE, type Point } from './support/geometry.js'
+import { GRAYBOX_MAP, groundProblems, inRect, overlapping, solid, PLAYER_HALF_SIZE, type Point } from './support/geometry.js'
 import {
   EPS,
   Walker,
@@ -45,6 +45,7 @@ function expectFreshSpawn(viewers: GameRoom[], id: string, team: Team, who: stri
     expectFacingPlusZ(p, who)
     expect(inRect(p, GRAYBOX_MAP.spawnAreas[team]), `${who} at ${p.x},${p.z} is in the ${team} area`).toBe(true)
     expect(overlapping(p).map((s) => s.id), `${who} overlaps no solid`).toEqual([])
+    expect(groundProblems(p), `${who} spawned on the ground`).toEqual([])
   }
 }
 

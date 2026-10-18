@@ -8,7 +8,7 @@ import { Client, type Room } from '@colyseus/sdk'
 import { MOVE_MESSAGE, ROOM_NAME, TEAMS, type GameRoomState, type MoveMessage, type Team } from '../../../shared/protocol.js'
 // Built server constants (server/build exists: Playwright's webServer runs it).
 import { BOUND } from '../../../server/build/rooms/MyRoom.js'
-import { overlapping, type Point } from './geometry.js'
+import { ROUTE_MARGIN, assertLegClear, feetY, groundProblems, hazardsAt, overlapping, type Point } from './geometry.js'
 import { isTeam, stepFor } from './movement.js'
 
 const port = Number(process.env.E2E_PORT ?? 2567)
@@ -21,12 +21,18 @@ export const WAIT_MS = 5_000
 
 export type GameRoom = Room<any, GameRoomState>
 
-/** A player as synced by the server since #20: team and yaw are required. */
+/**
+ * A player as synced by the server since #20: team and yaw are required.
+ * y (feet height) and mode are optional until #33 (#27): copied as received
+ * when present, checked by the walkers (support/geometry.ts groundProblems).
+ */
 export interface SyncedPlayer {
   x: number
   z: number
   team: Team
   yaw: number
+  y?: unknown
+  mode?: unknown
 }
 
 /**
@@ -44,7 +50,7 @@ export function pos(room: GameRoom, sessionId: string): SyncedPlayer {
   if (typeof yaw !== 'number' || !Number.isFinite(yaw) || Math.abs(yaw) > Math.PI + EPS) {
     throw new Error(`player ${sessionId} has yaw ${String(yaw)}, not a number in -pi..pi`)
   }
-  return { x, z, team, yaw }
+  return { x, z, team, yaw, ...(p.y !== undefined ? { y: p.y } : {}), ...(p.mode !== undefined ? { mode: p.mode } : {}) }
 }
 
 /** Player counts per team in `room`'s state. */
@@ -140,25 +146,47 @@ export const ARRIVE = 1e-5
 
 const clampUnit = (v: number) => Math.max(-1, Math.min(1, v))
 
+export interface WalkerOptions {
+  /**
+   * Ground walk (the default): every player in the room must stay on the
+   * ground (y 0 and mode 'ground' when the state has them), and this
+   * client's own player must stay out of the route hazards (ramps, covered
+   * pockets, climb spots; support/geometry.ts). Turn off for routes that
+   * go up on purpose (#30 and later).
+   */
+  ground?: boolean
+}
+
 /**
  * One SDK client walking its own player. Every state change it receives is
- * checked: no player in the room may overlap a ground solid or leave the
- * bounds at any moment, not only at the end of a walk.
+ * checked: no player in the room may overlap an obstacle (y-aware: solids,
+ * floors and ramps at the player's y) or leave the bounds at any moment, not
+ * only at the end of a walk. A ground walker also checks that everyone stays
+ * on the ground and that its own player stays out of the route hazards.
  */
 export class Walker {
   readonly violations: string[] = []
+  readonly ground: boolean
   private lastSend = 0
 
   constructor(
     readonly room: GameRoom,
     readonly name: string,
+    options: WalkerOptions = {},
   ) {
+    this.ground = options.ground ?? true
     room.onStateChange((s: GameRoomState) => {
       s.players?.forEach((p, id: string) => {
         const hit = overlapping(p)
-        if (hit.length) this.violations.push(`${id} at ${p.x},${p.z} overlaps ${hit.map((h) => h.id).join(',')}`)
+        if (hit.length) this.violations.push(`${id} at ${p.x},${feetY(p)},${p.z} overlaps ${hit.map((h) => h.id).join(',')}`)
         if (Math.abs(p.x) > BOUND + EPS || Math.abs(p.z) > BOUND + EPS) {
           this.violations.push(`${id} at ${p.x},${p.z} is outside +-BOUND`)
+        }
+        if (!this.ground) return
+        for (const g of groundProblems(p)) this.violations.push(`${id} at ${p.x},${p.z}: ${g}`)
+        if (id === room.sessionId) {
+          const hz = hazardsAt(p, 0)
+          if (hz.length) this.violations.push(`${id} at ${p.x},${p.z} walked into ${hz.join(',')}`)
         }
       })
     })
@@ -229,12 +257,22 @@ export class Walker {
    *
    * With the capped intent a 'both' leg still points at the target, so it
    * stays in the bounding rectangle and converges, only in more steps.
+   *
+   * A ground walker (the default) first checks each leg (for 'both', its
+   * bounding rectangle) keeps ROUTE_MARGIN from every route hazard, and
+   * throws before moving if not (#28).
    */
   async walkTo(target: Point, order: 'xz' | 'zx' | 'both' = 'xz'): Promise<Point> {
     await this.face(0)
     const step = this.stepSize
     const legs: ('x' | 'z' | 'both')[] = order === 'both' ? ['both'] : order === 'xz' ? ['x', 'z'] : ['z', 'x']
     for (const leg of legs) {
+      if (this.ground) {
+        // Static check of the planned leg (for 'both', its whole bounding
+        // rectangle), so a route can't be pointed through a hazard.
+        const from = this.pos
+        assertLegClear(from, { x: leg === 'z' ? from.x : target.x, z: leg === 'x' ? from.z : target.z }, this.name, ROUTE_MARGIN)
+      }
       let stuck = 0
       for (;;) {
         const p = this.pos

@@ -1,5 +1,22 @@
 import { describe, expect, it } from 'vitest'
-import { MAX_TEAM_SIZE, TEAMS, TEAM_SPEED } from '../../shared/protocol.js'
+import {
+  ACTIONS,
+  ACTION_MESSAGE,
+  ANCHOR_RANGE,
+  ANCHOR_REACH,
+  CAN_CLIMB,
+  CLIMB_SPEED,
+  GRAVITY,
+  JUMP_SPEED,
+  MAX_FALL_SPEED,
+  MAX_TEAM_SIZE,
+  MOVEMENT_MODES,
+  MOVE_MESSAGE,
+  SHIMMY_SPEED,
+  STEP_HEIGHT,
+  TEAMS,
+  TEAM_SPEED,
+} from '../../shared/protocol.js'
 import { GRAYBOX_MAP } from '../../shared/map.js'
 import { allowedSteps, clampIntent, isTeam, teamStep, worldStep, yawOf } from '../e2e/support/intent.ts'
 
@@ -109,5 +126,88 @@ describe('e2e movement helpers (support/intent.ts)', () => {
     expect(yawOf({ yaw: Number.NaN })).toBe(0)
     expect(isTeam('ghost') && isTeam('warden')).toBe(true)
     expect(isTeam('spectator') || isTeam(undefined) || isTeam('')).toBe(false)
+  })
+})
+
+// #27's vertical movement contract (shared/protocol.js), checked in #28.
+describe('vertical movement contract (#27)', () => {
+  /** The server's move and action handling rate (Hz): one climb or shimmy step per tick. */
+  const TICK_HZ = 20
+
+  it('MOVEMENT_MODES and ACTIONS are as documented, and frozen', () => {
+    expect([...MOVEMENT_MODES]).toEqual(['ground', 'falling', 'climbing', 'hanging'])
+    expect([...ACTIONS]).toEqual(['jump', 'climb', 'drop'])
+    expect(ACTION_MESSAGE).toBe('action')
+    expect(ACTION_MESSAGE).not.toBe(MOVE_MESSAGE)
+    for (const list of [MOVEMENT_MODES, ACTIONS]) {
+      expect(Object.isFrozen(list)).toBe(true)
+      expect(() => (list as unknown as string[]).push('fly')).toThrow(TypeError)
+    }
+  })
+
+  it('every vertical constant is a finite number, positive where it must be', () => {
+    const scalars: Record<string, number> = {
+      GRAVITY,
+      MAX_FALL_SPEED,
+      STEP_HEIGHT,
+      CLIMB_SPEED,
+      SHIMMY_SPEED,
+      ANCHOR_RANGE,
+      ANCHOR_REACH,
+    }
+    for (const [name, v] of Object.entries(scalars)) {
+      expect(typeof v, name).toBe('number')
+      expect(Number.isFinite(v), name).toBe(true)
+      expect(v, name).toBeGreaterThan(0)
+    }
+    // Jump speeds: one per team, finite, never negative (0 means the team can't jump).
+    expect(Object.keys(JUMP_SPEED).sort()).toEqual([...TEAMS].sort())
+    for (const t of TEAMS) {
+      expect(Number.isFinite(JUMP_SPEED[t]), t).toBe(true)
+      expect(JUMP_SPEED[t], t).toBeGreaterThanOrEqual(0)
+    }
+    expect(JUMP_SPEED.ghost, 'Ghosts can jump').toBeGreaterThan(0)
+    // CAN_CLIMB: one boolean per team.
+    expect(Object.keys(CAN_CLIMB).sort()).toEqual([...TEAMS].sort())
+    for (const t of TEAMS) expect(typeof CAN_CLIMB[t], t).toBe('boolean')
+  })
+
+  it('the per-team tables are frozen', () => {
+    for (const [name, o] of [
+      ['JUMP_SPEED', JUMP_SPEED],
+      ['CAN_CLIMB', CAN_CLIMB],
+    ] as const) {
+      expect(Object.isFrozen(o), name).toBe(true)
+      expect(() => {
+        ;(o as Record<string, unknown>).warden = 99
+      }, name).toThrow(TypeError)
+    }
+    expect(JUMP_SPEED.warden).not.toBe(99)
+    expect(CAN_CLIMB.warden).not.toBe(99)
+  })
+
+  it('Wardens can neither jump nor climb; Ghosts can climb', () => {
+    expect(JUMP_SPEED.warden).toBe(0)
+    expect(CAN_CLIMB.warden).toBe(false)
+    expect(CAN_CLIMB.ghost).toBe(true)
+  })
+
+  it("for each team the jump apex v^2 / (2 * GRAVITY) plus STEP_HEIGHT is below the lowest cover top", () => {
+    const coverTops = GRAYBOX_MAP.solids.filter((s) => s.kind === 'cover').map((s) => s.max.y)
+    expect(coverTops.length).toBeGreaterThan(0)
+    const lowestCover = Math.min(...coverTops)
+    const lowestSolid = Math.min(...GRAYBOX_MAP.solids.map((s) => s.max.y))
+    for (const t of TEAMS) {
+      const apex = JUMP_SPEED[t] ** 2 / (2 * GRAVITY)
+      expect(apex + STEP_HEIGHT, `${t}: apex ${apex} + step`).toBeLessThan(lowestCover)
+      expect(apex + STEP_HEIGHT, `${t}: apex ${apex} + step`).toBeLessThan(lowestSolid)
+    }
+    // The documented value: a Ghost's apex is about 0.51.
+    expect(JUMP_SPEED.ghost ** 2 / (2 * GRAVITY)).toBeCloseTo(0.50625, 9)
+  })
+
+  it('a climb or shimmy step per tick (speed / 20) is at most 0.5', () => {
+    expect(CLIMB_SPEED / TICK_HZ).toBeLessThanOrEqual(0.5)
+    expect(SHIMMY_SPEED / TICK_HZ).toBeLessThanOrEqual(0.5)
   })
 })

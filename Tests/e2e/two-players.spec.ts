@@ -1,7 +1,7 @@
 import { expect, test, type Browser, type Page } from '@playwright/test'
 import type { BlacksitePlayerSnapshot, BlacksiteSnapshot } from '../../shared/testhook.js'
 import { angleDiff } from './support/intent.js'
-import { expectTeamsAndYaws } from './support/hook.js'
+import { expectOnGround, expectTeamsAndYaws } from './support/hook.js'
 
 // Milestone #1 (issue #5), moved onto the client test hook in #12: two browser
 // tabs join the shared room and each sees the other player move.
@@ -114,6 +114,7 @@ async function settle(a: Page, b: Page, ids: string[]): Promise<{ a: BlacksiteSn
 async function expectLocalFacingPlusZ(page: Page) {
   const s = await snap(page)
   expectTeamsAndYaws(s)
+  expectOnGround(s)
   const local = s.players.find((p) => p.isLocal)!
   expect(angleDiff(local.yaw, 0), `local player faces +z (yaw ${local.yaw})`).toBeLessThan(EPS)
 }
@@ -308,7 +309,9 @@ test('two tabs share the room and each sees the other move', async ({ browser })
       expect(same(get(s, idB), b0), `B did not move (seen by ${s.sessionId})`).toBe(true)
     }
 
-    // Still exactly two players in each tab.
+    // Still exactly two players in each tab, both still on the ground and
+    // clear of ramps, pockets and climb spots after A's short walk (#28).
+    for (const s of [afterD.a, afterD.b, afterW.a, afterW.b]) expectOnGround(s)
     for (const s of [afterW.a, afterW.b]) {
       expect(s.connected).toBe(true)
       expect(s.players).toHaveLength(2)

@@ -4,7 +4,7 @@ import { TEAM_SPEED, type Team } from '../../shared/protocol.js'
 import type { BlacksiteSnapshot } from '../../shared/testhook.js'
 import { expectTeamsAndYaws } from './support/hook.js'
 import { angleDiff, stepFor, worldStep } from './support/movement.js'
-import { analyse, expectNeverFasterThanLimit, expectNoOverlap, pathClear, track } from './support/legs.js'
+import { analyse, expectGroundRoute, expectNeverFasterThanLimit, expectNoOverlap, pathClear, track } from './support/legs.js'
 import {
   EPS,
   MODE_FOR_TEAM,
@@ -64,7 +64,8 @@ const HEADING_TOL = 0.01
 
 /**
  * Turns to try, per team, in radians from the spawn facing; the first whose
- * W leg and D leg are clear of solids from the player's actual position is
+ * W leg and D leg are clear of solids and route hazards (ramps,
+ * covered pockets, climb spots; #28) from the player's actual position is
  * used. None is axis-aligned, so both sin and cos of the yaw matter.
  * Ghosts spawn outside, south (x -4..4, z -18..-14); wardens inside the
  * building (x -3..3, z 2..5).
@@ -115,7 +116,10 @@ async function unturnedW(tab: Tab, other: Tab) {
   const stop = await startSampler(tab.page)
   const hold = await holdKey(tab.page, 'KeyW', UNTURNED_MS)
   await tab.page.waitForTimeout(250)
-  const leg = analyse(track(await stop(), me.id), step)
+  const samples = await stop()
+  expectNoOverlap(samples, `${tab.name} unturned W`)
+  expectGroundRoute(samples, `${tab.name} unturned W`)
+  const leg = analyse(track(samples, me.id), step)
   const sent = tab.sent.since(t0)
   expectMoves(sent, { dx: 0, dz: 1, yaw: 0 }, `${tab.name} unturned W`)
   expectSendRate(sent.length, hold.up - hold.down, `${tab.name} unturned W`)
@@ -210,6 +214,8 @@ async function turnAndWalk(tab: Tab, other: Tab): Promise<{ speed: number; perMo
   expectSendRate(sentW.length, holdW.up - holdW.down, `${tab.name} W`)
   expectNoOverlap(samplesA, tab.name)
   expectNoOverlap(samplesB, other.name)
+  expectGroundRoute(samplesA, tab.name)
+  expectGroundRoute(samplesB, other.name)
 
   const legTrack = track(samplesA, me.id)
   const w = analyse(legTrack, step)
@@ -245,6 +251,7 @@ async function turnAndWalk(tab: Tab, other: Tab): Promise<{ speed: number; perMo
   expectMoves(sentD, { dx: 1, dz: 0, yaw: cam.yaw }, `${tab.name} D`)
   expectSendRate(sentD.length, holdD.up - holdD.down, `${tab.name} D`)
   expectNoOverlap(samplesD, tab.name)
+  expectGroundRoute(samplesD, tab.name)
   const d = analyse(track(samplesD, me.id), step)
   expect(d.distance, `${tab.name}: D moved`).toBeGreaterThan(step * 3)
   const right = Math.atan2(Math.cos(cam.yaw), -Math.sin(cam.yaw))

@@ -4,7 +4,7 @@
 
 import { expect } from '@playwright/test'
 import { BOUND, MOVE_BURST, MOVE_RATE_HZ } from '../../../server/build/rooms/MyRoom.js'
-import { overlapping, type Point } from './geometry.js'
+import { ROUTE_MARGIN, feetY, groundProblems, hazardsAt, overlapping, type Point } from './geometry.js'
 import type { Sample } from './tabs.js'
 
 export interface LegTrack {
@@ -87,13 +87,16 @@ export function expectNeverFasterThanLimit(leg: LegTrack, step: number, who: str
   expect(worst, `${who} never outruns the rate limit; worst window: ${worstAt}`).toBeLessThanOrEqual(1)
 }
 
-/** Fails if any sample of any player overlaps a ground solid or leaves the bounds. */
+/**
+ * Fails if any sample of any player overlaps an obstacle (y-aware: solids,
+ * floors and ramps, at the sample's y, default 0) or leaves the bounds.
+ */
 export function expectNoOverlap(samples: Sample[], who: string): void {
   const bad: string[] = []
   for (const s of samples) {
     for (const p of s.players) {
       const hit = overlapping(p)
-      if (hit.length) bad.push(`${p.id} at ${p.x},${p.z} overlaps ${hit.map((h) => h.id).join(',')}`)
+      if (hit.length) bad.push(`${p.id} at ${p.x},${feetY(p)},${p.z} overlaps ${hit.map((h) => h.id).join(',')}`)
       if (Math.abs(p.x) > BOUND + 1e-4 || Math.abs(p.z) > BOUND + 1e-4) bad.push(`${p.id} at ${p.x},${p.z} is out of bounds`)
     }
   }
@@ -101,9 +104,28 @@ export function expectNoOverlap(samples: Sample[], who: string): void {
 }
 
 /**
- * True if a player box moving in a straight line from `from` along unit
- * direction (sin yaw, cos yaw) stays clear of every ground solid and inside
- * the bounds for `distance` units (checked every 0.02 units).
+ * Fails if any sample of any player is off the ground (y other than 0 or a
+ * mode other than 'ground', when the snapshot has them) or inside a route
+ * hazard (ramp, covered pocket, climb spot; support/geometry.ts). Browser
+ * routes are ground routes.
+ */
+export function expectGroundRoute(samples: Sample[], who: string): void {
+  const bad: string[] = []
+  for (const s of samples) {
+    for (const p of s.players) {
+      for (const g of groundProblems(p)) bad.push(`${p.id} at ${p.x},${p.z}: ${g}`)
+      const hz = hazardsAt(p, 0)
+      if (hz.length) bad.push(`${p.id} at ${p.x},${p.z} is in ${hz.join(',')}`)
+    }
+  }
+  expect(bad.slice(0, 5), `${who}: every player stays on the ground and out of ramps, pockets and climb spots (${bad.length} bad samples)`).toEqual([])
+}
+
+/**
+ * True if a player box moving on the ground in a straight line from `from`
+ * along unit direction (sin yaw, cos yaw) stays clear of every obstacle and
+ * route hazard (with ROUTE_MARGIN) and inside the bounds for `distance`
+ * units (checked every 0.02 units).
  */
 export function pathClear(from: Point, yaw: number, distance: number): boolean {
   const dx = Math.sin(yaw)
@@ -111,6 +133,7 @@ export function pathClear(from: Point, yaw: number, distance: number): boolean {
   for (let d = 0; d <= distance; d += 0.02) {
     const p = { x: from.x + dx * d, z: from.z + dz * d }
     if (overlapping(p, -0.05).length) return false // 0.05 units of margin
+    if (hazardsAt(p, ROUTE_MARGIN).length) return false
     if (Math.abs(p.x) > BOUND - 0.01 || Math.abs(p.z) > BOUND - 0.01) return false
   }
   return true
