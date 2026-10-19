@@ -215,9 +215,9 @@ export function texturizeSurfaces(scene: Scene, gfx: GfxSettings, hooks?: Surfac
       const tex = new Texture(
         textureUrl(set, map),
         scene,
-        false,
+        !pbr, // low: no mipmaps, the cheapest sampling (weak and software renderers)
         false, // invertY = false: glTF convention
-        Texture.TRILINEAR_SAMPLINGMODE,
+        pbr ? Texture.TRILINEAR_SAMPLINGMODE : Texture.BILINEAR_SAMPLINGMODE,
         () => settle(true),
         () => settle(false),
       )
