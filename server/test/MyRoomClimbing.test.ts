@@ -94,11 +94,11 @@ describe("MyRoom climbing and hanging", () => {
     assert.strictEqual(p.x, a.x);
     assert.ok(Math.abs(p.yaw - 0.3) < EPS);
     let moves = 0;
-    while (p.mode === "climbing" && moves < 40) {
-      const y0 = p.y;
+    while ((p.mode as string) === "climbing" && moves < 40) {
+      const y0: number = p.y;
       await move(g, 0, 1);
       moves++;
-      if (p.mode === "climbing") assert.ok(Math.abs(p.y - (y0 + CLIMB_STEP)) < 1e-9, `step ${moves}`);
+      if ((p.mode as string) === "climbing") assert.ok(Math.abs(p.y - (y0 + CLIMB_STEP)) < 1e-9, `step ${moves}`);
       assertClear3(p, `climb ${moves}`);
     }
     assert.strictEqual(moves, Math.round((a.maxY - a.minY) / CLIMB_STEP));
