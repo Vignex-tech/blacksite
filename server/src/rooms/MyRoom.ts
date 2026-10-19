@@ -1,10 +1,13 @@
 import { Room, Client, CloseCode } from "colyseus";
 import {
   ACTION_MESSAGE,
+  CAN_CLIMB,
+  CLIMB_SPEED,
   GROUND_SIZE,
   JUMP_SPEED,
   MAX_TEAM_SIZE,
   MOVE_MESSAGE,
+  SHIMMY_SPEED,
   STEP_HEIGHT,
   TEAMS,
   TEAM_SPEED,
@@ -16,6 +19,7 @@ import { MyRoomState, Player } from "./schema/MyRoomState.js";
 import { groundSolids } from "../rules/collision.js";
 import { moveBody, startJump, stepFall, supportHeight, type Body, type World } from "../rules/vertical.js";
 import { parseAction } from "../rules/actions.js";
+import { MANTLE_DISTANCE, climbMove, grab, letGo, mantle, shimmy, type ClimbBody } from "../rules/climbing.js";
 import { randomSpawnPoint } from "../rules/spawn.js";
 import { assignTeam } from "../rules/teams.js";
 import { parseMove, worldStep } from "../rules/movement.js";
@@ -26,6 +30,8 @@ export { PLAYER_HALF_SIZE };
 export { parseMove };
 /** Action validation lives in rules/actions.ts. */
 export { parseAction };
+/** How far a mantle moves the player onto the top (rules/climbing.ts). */
+export { MANTLE_DISTANCE };
 
 /**
  * Intended move-message rate (Hz). Each team's max sustained speed is
@@ -71,6 +77,12 @@ export const ACTION_RATE_HZ = 5;
 
 /** Action budget capacity: at most this many actions back to back. */
 export const ACTION_BURST = 2;
+
+/** Feet travel per accepted move while climbing, at full input: CLIMB_SPEED / MOVE_RATE_HZ (0.075). */
+export const CLIMB_STEP = CLIMB_SPEED / MOVE_RATE_HZ;
+
+/** Travel along a ledge per accepted move while hanging, at full input: SHIMMY_SPEED / MOVE_RATE_HZ (0.05). */
+export const SHIMMY_STEP = SHIMMY_SPEED / MOVE_RATE_HZ;
 
 /** The map this room plays on. */
 const MAP = GRAYBOX_MAP;
@@ -123,6 +135,9 @@ export class MyRoom extends Room<{ state: MyRoomState }> {
   /** Server-only vertical speeds (u/s, +up) by sessionId; never synchronized. */
   private verticalSpeeds = new Map<string, number>();
 
+  /** Server-only anchor ids of attached (climbing or hanging) players; never synchronized. */
+  private attachments = new Map<string, string>();
+
   /** Simulated time not yet consumed by a whole step (ms). */
   private simAccumulator = 0;
 
@@ -162,6 +177,19 @@ export class MyRoom extends Room<{ state: MyRoomState }> {
     if (player.z !== body.z) player.z = body.z;
     if (player.mode !== body.mode) player.mode = body.mode;
     this.verticalSpeeds.set(sessionId, body.vy);
+  }
+
+  /** The player's state as a ClimbBody for rules/climbing.ts (adds yaw and the anchor). */
+  private climbBodyOf(sessionId: string, player: Player): ClimbBody {
+    return { ...this.bodyOf(sessionId, player), yaw: player.yaw, anchorId: this.attachments.get(sessionId) ?? null };
+  }
+
+  /** Writes a ClimbBody back, with its yaw and anchor. */
+  private storeClimbBody(sessionId: string, player: Player, body: ClimbBody) {
+    this.storeBody(sessionId, player, body);
+    if (player.yaw !== body.yaw) player.yaw = body.yaw;
+    if (body.anchorId === null) this.attachments.delete(sessionId);
+    else this.attachments.set(sessionId, body.anchorId);
   }
 
   /**
@@ -208,6 +236,16 @@ export class MyRoom extends Room<{ state: MyRoomState }> {
       if (move.yaw !== undefined) player.yaw = move.yaw;
       if (move.dx === 0 && move.dz === 0) return;
 
+      if (player.mode === "climbing" || player.mode === "hanging") {
+        // Attached: dz climbs along the anchor, dx shimmies along the ledge.
+        const body = this.climbBodyOf(client.sessionId, player);
+        const changed = player.mode === "climbing"
+          ? climbMove(WORLD, MAP.anchors, body, move.dz * CLIMB_STEP)
+          : shimmy(WORLD, MAP.anchors, body, move.dx * SHIMMY_STEP);
+        if (changed) this.storeClimbBody(client.sessionId, player, body);
+        return;
+      }
+
       // Same team step on the ground and in the air (no extra air speed).
       const step = worldStep(move.dx, move.dz, player.yaw, TEAM_STEP[player.team as Team]);
       // Height-aware and swept (x, then z, so walls can be slid along); the
@@ -228,12 +266,26 @@ export class MyRoom extends Room<{ state: MyRoomState }> {
       // Over budget: ignore. Refused actions still spend a token.
       if (!this.spendAction(client.sessionId)) return;
 
+      const team = player.team as Team;
       if (action === "jump") {
         // Only from the ground, and only for teams that can jump (not Wardens).
         const body = this.bodyOf(client.sessionId, player);
-        if (startJump(body, JUMP_SPEED[player.team as Team])) this.storeBody(client.sessionId, player, body);
+        if (startJump(body, JUMP_SPEED[team])) this.storeBody(client.sessionId, player, body);
+        return;
       }
-      // 'climb' and 'drop' are accepted and change nothing until #31.
+      const body = this.climbBodyOf(client.sessionId, player);
+      let changed = false;
+      if (action === "climb") {
+        // Grab the anchor picked from the player's own position, or mantle
+        // while hanging. Wardens (CAN_CLIMB false) are always refused.
+        changed = player.mode === "hanging"
+          ? mantle(WORLD, MAP.anchors, body)
+          : grab(WORLD, MAP.anchors, body, CAN_CLIMB[team]);
+      } else {
+        // 'drop': let go when attached; a no-op in any other mode.
+        changed = letGo(body);
+      }
+      if (changed) this.storeClimbBody(client.sessionId, player, body);
     },
   };
 
@@ -263,6 +315,7 @@ export class MyRoom extends Room<{ state: MyRoomState }> {
     this.moveBudgets.delete(client.sessionId);
     this.actionBudgets.delete(client.sessionId);
     this.verticalSpeeds.delete(client.sessionId);
+    this.attachments.delete(client.sessionId);
     console.log(client.sessionId, "left!", code);
   }
 
