@@ -102,6 +102,8 @@ export interface ReadonlyKeyedMap<V> {
 /** Shape of the room state: `players` keyed by the client's sessionId. */
 export interface GameRoomState {
   players: ReadonlyKeyedMap<PlayerState>
+  /** Terminals keyed by terminal id (M6, #54). Not populated until the server adds it (#56). */
+  terminals: ReadonlyKeyedMap<TerminalState>
 }
 
 // ---------------------------------------------------------------------------
@@ -334,4 +336,73 @@ export interface DamagedEvent {
   health: number
   /** True if this hit eliminated the victim. */
   killed: boolean
+}
+
+// ---------------------------------------------------------------------------
+// Hacking one terminal (M6, #54). Runtime values live in protocol.js. Nothing
+// reads them until the server applies them (#56). Each constant is changeable
+// in protocol.js, and only there (owner decisions on #53).
+
+/** Message type the client sends to hold or release interact. Payload: InteractMessage. */
+export declare const INTERACT_MESSAGE: 'interact'
+
+/**
+ * Payload of the "interact" message: `active: true` starts or keeps holding,
+ * `false` releases. It carries no terminal id and no position: the server
+ * picks the active terminal from the player's own server position, so there
+ * is nothing to forge. Anything that is not a non-array object with a boolean
+ * `active` is ignored and spends no rate-limit token. After any interruption
+ * the Ghost must send `active: true` again; a held key does not resume.
+ * The bucket (`INTERACT_RATE_HZ`, `INTERACT_BURST`) is a server constant.
+ */
+export interface InteractMessage {
+  active: boolean
+}
+
+/** Continuous hacking time to finish: 10000 ms. */
+export declare const HACK_DURATION_MS: 10000
+
+/** Horizontal range from the terminal's x, z: 1.5 u. */
+export declare const HACK_RANGE: 1.5
+
+/** Progress lost per second while nobody hacks, as a fraction of the gain rate: 0.5. */
+export declare const HACK_DECAY_RATIO: 0.5
+
+/** Time a hack must run before Wardens are alerted: 3000 ms. */
+export declare const HACK_ALERT_AFTER_MS: 3000
+
+/** Which teams may hack, frozen: `{ ghost: true, warden: false }`. */
+export declare const CAN_HACK: Readonly<Record<Team, boolean>>
+
+/** Terminal statuses, frozen: `['idle', 'hacking', 'hacked']`. */
+export declare const TERMINAL_STATUSES: readonly ['idle', 'hacking', 'hacked']
+export type TerminalStatus = 'idle' | 'hacking' | 'hacked'
+
+/**
+ * One terminal in room state, keyed by terminal id. Sent to every client, so
+ * it holds nothing a Warden must not know: no hacker, no hacker count, no
+ * position and no progress.
+ *
+ * What a Warden client is told: `status` and `alert` only. The server
+ * withholds `hacking` from a Warden's view until the alert, so for the first
+ * `HACK_ALERT_AFTER_MS` of a hack a Warden sees `idle` and no cue. `alert`
+ * means "someone is hacking now"; it clears when the hack is interrupted.
+ * What a Warden is never told: who is hacking, how many, where they stand,
+ * or the progress. There is no marker or pin for the alert (rules 2 and 3).
+ */
+export interface TerminalState {
+  id: string
+  status: TerminalStatus
+  alert: boolean
+}
+
+/** Message type the server sends to Ghost clients only. Payload: HackProgressMessage. */
+export declare const HACK_PROGRESS_MESSAGE: 'hackProgress'
+
+/**
+ * Hack progress, 0 to 1. Sent to Ghost clients only, never to a Warden, and
+ * not part of room state (so a Warden's state can never carry it).
+ */
+export interface HackProgressMessage {
+  progress: number
 }

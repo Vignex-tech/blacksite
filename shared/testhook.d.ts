@@ -15,7 +15,7 @@
 //   changes meaning (#48 made `health`, `ammo` and `reloading` always present), so tests should match the fields they need, not the
 //   exact shape.
 
-import type { MovementMode, Team } from './protocol.js'
+import type { MovementMode, Team, TerminalStatus } from './protocol.js'
 
 /** One player as the client currently knows it from room state. */
 export interface BlacksitePlayerSnapshot {
@@ -111,6 +111,17 @@ export interface BlacksiteSnapshot {
    * player. Additive; always present.
    */
   events: { shots: number; hits: number; kills: number; damaged: number }
+  /**
+   * Terminals as received from room state (M6, #54), optional and additive;
+   * nothing fills it yet. `active` is true for `ACTIVE_TERMINAL_ID`. A Warden
+   * client sees only what the server sends it: no progress, no hacker.
+   */
+  terminals?: { id: string; status: TerminalStatus; alert: boolean; active: boolean }[]
+  /**
+   * The local Ghost's hack progress, 0 to 1, from `hackProgress` messages
+   * (M6, #54). null or absent for a Warden, who is never told the progress.
+   */
+  hack?: { progress: number } | null
 }
 
 export interface BlacksiteTestHook {

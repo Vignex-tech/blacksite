@@ -135,3 +135,10 @@ export const GRAYBOX_MAP = deepFreeze({
     { id: 'ledge-catwalk-south', kind: 'ledge', x0: -7.5, z0: -1.5, x1: 5.5, z1: -1.5, y: UPPER_LEVEL_Y, facing: FACE_NORTH },
   ],
 })
+
+/**
+ * Id of the one terminal that can be hacked in Phase 1 (M6, #54). It names an
+ * entry of GRAYBOX_MAP.terminals. The other terminal is drawn but cannot be
+ * hacked until Phase 2. Tune here only.
+ */
+export const ACTIVE_TERMINAL_ID = 'terminal-a'

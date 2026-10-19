@@ -121,3 +121,31 @@ export const HIT_EVENT = 'hit'
 
 /** Server-to-client event, to the victim: you were hurt. Payload: DamagedEvent. */
 export const DAMAGED_EVENT = 'damaged'
+
+// Hacking one terminal (M6, #54). Meanings and conventions are documented in
+// protocol.d.ts. Nothing reads these until the server applies them (#56).
+// INTERACT_RATE_HZ and INTERACT_BURST are server constants, not here.
+
+/** Message type the client sends while holding (or releasing) interact. Payload: InteractMessage. */
+export const INTERACT_MESSAGE = 'interact'
+
+/** Message type the server sends to Ghost clients only: hack progress. Payload: HackProgressMessage. */
+export const HACK_PROGRESS_MESSAGE = 'hackProgress'
+
+/** Continuous hacking time needed to finish a hack, in ms. */
+export const HACK_DURATION_MS = 10000
+
+/** Largest horizontal distance from the terminal's x, z at which a Ghost can hack, in u. */
+export const HACK_RANGE = 1.5
+
+/** Progress lost per second while nobody hacks, as a fraction of the gain rate. */
+export const HACK_DECAY_RATIO = 0.5
+
+/** A hack must run this long before Wardens are alerted, in ms. */
+export const HACK_ALERT_AFTER_MS = 3000
+
+/** Which teams may hack. */
+export const CAN_HACK = Object.freeze({ ghost: true, warden: false })
+
+/** Terminal statuses, in room state. */
+export const TERMINAL_STATUSES = Object.freeze(['idle', 'hacking', 'hacked'])

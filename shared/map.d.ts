@@ -62,6 +62,7 @@
 //     below the lowest cover top (1.2), so no solid top can be stood on from
 //     the ground, and every ledge is out of reach from the ground: its
 //     y - PLAYER_HEIGHT - ANCHOR_REACH is above the jump apex.
+// 17. (M6, #54) ACTIVE_TERMINAL_ID names an existing terminal.
 //
 // Extending:
 // - Collision becomes y-aware in M4 (#29): a box (solid, floor or the wedge
@@ -258,3 +259,10 @@ export interface GrayboxMap {
  * The object is deeply frozen; treat it as read-only.
  */
 export declare const GRAYBOX_MAP: GrayboxMap
+
+/**
+ * Id of the one terminal that can be hacked (M6, #54): `'terminal-a'`. Only
+ * the active terminal can be hacked; the other one is drawn but inert until
+ * Phase 2. Invariant 17: it names an existing entry of `GRAYBOX_MAP.terminals`.
+ */
+export declare const ACTIVE_TERMINAL_ID: 'terminal-a'
