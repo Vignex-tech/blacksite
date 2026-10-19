@@ -16,8 +16,10 @@
 // Round state is read defensively: before #68 `state.round` is undefined, so
 // `roundOf` returns undefined and nothing here throws on it.
 
-import type { Room } from '@colyseus/sdk'
-import { ROUND_EVENT, type RoundEvent, type RoundPhase, type RoundState } from '../../../shared/protocol.js'
+import { Client, type Room } from '@colyseus/sdk'
+import { ROOM_NAME, ROUND_EVENT, type RoundEvent, type RoundPhase, type RoundState } from '../../../shared/protocol.js'
+import { waitForState, type GameRoom } from './sdk.js'
+import { WireClient } from './wire.js'
 
 /** Port of the second test server (the `fast` preset). */
 export const roundPort = Number(process.env.E2E_ROUND_PORT ?? 2568)
@@ -78,4 +80,34 @@ export async function waitForPhase(room: Pick<Room, 'state'>, phase: RoundPhase,
     }
     await new Promise((res) => setTimeout(res, 25))
   }
+}
+
+// ---------------------------------------------------------------------------
+// Joining the `fast` server (#69). Every client is built from roundEndpoint.
+// Rooms are created fresh (`create`) and joined by id, so specs run in
+// parallel without sharing a room. Join order decides teams: ghost, warden,
+// ghost, warden.
+// ---------------------------------------------------------------------------
+
+/** Creates a fresh room on the `fast` server; waits until the client sees itself. `wire` keeps every raw frame (support/wire.ts). */
+export async function createRound(open: GameRoom[], options: object = {}, wire = false): Promise<GameRoom> {
+  const C = wire ? WireClient : Client
+  const r = (await new C(roundEndpoint).create(ROOM_NAME, options)) as GameRoom
+  open.push(r)
+  await waitForState(r, `${r.sessionId} sees itself`, (s) => !!s.players?.has(r.sessionId))
+  return r
+}
+
+/** Joins room `roomId` on the `fast` server; waits until the client sees itself. */
+export async function joinRound(roomId: string, open: GameRoom[], options: object = {}, wire = false): Promise<GameRoom> {
+  const C = wire ? WireClient : Client
+  const r = (await new C(roundEndpoint).joinById(roomId, options)) as GameRoom
+  open.push(r)
+  await waitForState(r, `${r.sessionId} sees itself`, (s) => !!s.players?.has(r.sessionId))
+  return r
+}
+
+/** The five public round fields as a plain object (a schema spread carries a Symbol that toEqual rejects). */
+export function roundPlain(r: RoundState): RoundState {
+  return { phase: r.phase, roundNumber: r.roundNumber, secondsLeft: r.secondsLeft, winner: r.winner, winReason: r.winReason }
 }

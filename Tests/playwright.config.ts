@@ -72,11 +72,14 @@ export default defineConfig({
     },
     // Round specs against the fast-timer server on roundPort. SDK specs build
     // their client from roundEndpoint (support/rounds.ts). One worker: a
-    // round-enabled room is shared state. Added wall time: none until a spec exists.
+    // round-enabled room is shared state. SDK specs create their own rooms (createRound),
+    // so they run in parallel mode on 4 workers (#69: the 30 s round test runs alongside
+    // the others). A *.rounds.tabs.spec.ts that uses joinOrCreate must use
+    // test.describe.configure({ mode: 'serial' }) and not share a file's worth of rooms.
     {
       name: 'rounds',
       testMatch: ROUNDS,
-      workers: 1,
+      workers: 4,
       use: { ...devices['Desktop Chrome'], baseURL: `http://localhost:${roundPort}` },
     },
   ],
