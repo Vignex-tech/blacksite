@@ -67,6 +67,7 @@ if (game) {
   testHook.setMap(game.map.id, game.map.renderedSolids, game.traversal)
   const rig = game.camera
   testHook.setCamera(() => ({ mode: rig.mode, yaw: rig.yaw }))
+  testHook.setPerf(() => game!.perf.read())
   start(game)
 }
 

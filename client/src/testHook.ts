@@ -1,4 +1,4 @@
-import type { BlacksiteCameraSnapshot, BlacksiteSnapshot, BlacksiteTestHook } from '../../shared/testhook.js'
+import type { BlacksiteCameraSnapshot, BlacksitePerfSnapshot, BlacksiteSnapshot, BlacksiteTestHook } from '../../shared/testhook.js'
 import { ACTIVE_TERMINAL_ID } from '../../shared/map.js'
 import type { MovementMode, Team, TerminalStatus } from '../../shared/protocol.js'
 import type { RoundView } from './roundView.ts'
@@ -30,6 +30,8 @@ export interface TestHookRecorder {
   setMap(id: string, renderedSolids: number, traversal?: TraversalCounts): void
   /** Where snapshot() reads the camera from; until set, `camera` is absent. */
   setCamera(source: () => BlacksiteCameraSnapshot): void
+  /** Where snapshot() reads `perf` from (M8, #79); until set, `perf` is absent. */
+  setPerf(source: () => BlacksitePerfSnapshot): void
   /** Counts a received combat event (M5, #50). */
   recordEvent(kind: 'shot' | 'hit' | 'kill' | 'damaged'): void
   /** Records a terminal as received from room state (M6, #60). */
@@ -76,6 +78,7 @@ export function installTestHook(target: Window = window): TestHookRecorder {
   let hackProgress: number | null = null
   let round: RoundView | null = null
   let cameraSource: (() => BlacksiteCameraSnapshot) | null = null
+  let perfSource: (() => BlacksitePerfSnapshot) | null = null
 
   const hook: BlacksiteTestHook = Object.freeze({
     snapshot(): BlacksiteSnapshot {
@@ -117,6 +120,7 @@ export function installTestHook(target: Window = window): TestHookRecorder {
         const { mode, yaw } = cameraSource()
         snap.camera = { mode, yaw }
       }
+      if (perfSource) snap.perf = { ...perfSource() }
       return snap
     },
   })
@@ -189,6 +193,9 @@ export function installTestHook(target: Window = window): TestHookRecorder {
     },
     setCamera(source) {
       cameraSource = source
+    },
+    setPerf(source) {
+      perfSource = source
     },
   }
 }

@@ -74,6 +74,16 @@ export interface BlacksiteCameraSnapshot {
   yaw: number
 }
 
+/** Render statistics for the dev overlay and budget checks (M8, #79). Rendering only. */
+export interface BlacksitePerfSnapshot {
+  /** Frames per second, rounded. */
+  fps: number
+  /** Draw calls in the last frame. */
+  drawCalls: number
+  /** Triangles in the meshes active in the last sample. */
+  activeTriangles: number
+}
+
 export interface BlacksiteSnapshot {
   /** Shape version. Bumped when a field changes meaning or is removed. */
   version: 1
@@ -133,6 +143,11 @@ export interface BlacksiteSnapshot {
     winner: Team | ''
     winReason: RoundWinReason | ''
   }
+  /**
+   * Render statistics (M8, #79), additive; present once the game scene exists.
+   * Hook version stays 1. CI asserts counts, never fps (software GL).
+   */
+  perf?: BlacksitePerfSnapshot
 }
 
 export interface BlacksiteTestHook {

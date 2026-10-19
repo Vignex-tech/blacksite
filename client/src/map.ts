@@ -6,7 +6,8 @@ import { Color3 } from '@babylonjs/core/Maths/math.color'
 import { Mesh } from '@babylonjs/core/Meshes/mesh'
 import { VertexData } from '@babylonjs/core/Meshes/mesh.vertexData'
 import { GRAYBOX_MAP, PLAYER_HALF_SIZE, PLAYER_HEIGHT } from '../../shared/map.js'
-import type { ClimbAnchor, GrayboxMap, LedgeAnchor, Ramp, SolidKind } from '../../shared/map.js'
+import type { ClimbAnchor, GrayboxMap, LedgeAnchor, Ramp } from '../../shared/map.js'
+import { SURFACE_STYLE, surfaceMaterialName, type SurfaceKind } from './surfaceStyle.ts'
 
 /** Size of a terminal marker: a thin post from the floor up past the interaction point. */
 const TERMINAL_MARKER_WIDTH = 0.35
@@ -18,10 +19,10 @@ export interface RenderedMap {
   renderedSolids: number
 }
 
-/** Neutral greys, well away from the player colours (blue own box, orange others). */
-const SOLID_COLOURS: Record<SolidKind, Color3> = {
-  wall: new Color3(0.62, 0.62, 0.63),
-  cover: new Color3(0.42, 0.42, 0.43),
+/** The shared material of a surface kind, from the data-driven style table (surfaceStyle.ts). */
+function surfaceMaterial(scene: Scene, kind: SurfaceKind): StandardMaterial {
+  const [r, g, b] = SURFACE_STYLE[kind].fallback
+  return material(scene, surfaceMaterialName(kind), new Color3(r, g, b))
 }
 
 function material(scene: Scene, name: string, diffuse: Color3, emissive = Color3.Black()): StandardMaterial {
@@ -46,13 +47,10 @@ export function buildMap(scene: Scene, map: GrayboxMap = GRAYBOX_MAP): RenderedM
     scene,
   )
   ground.position.set((bounds.minX + bounds.maxX) / 2, 0, (bounds.minZ + bounds.maxZ) / 2)
-  ground.material = material(scene, 'groundMat', new Color3(0.24, 0.24, 0.25))
+  ground.material = surfaceMaterial(scene, 'ground')
   ground.freezeWorldMatrix()
 
-  const solidMats: Record<SolidKind, StandardMaterial> = {
-    wall: material(scene, 'wallMat', SOLID_COLOURS.wall),
-    cover: material(scene, 'coverMat', SOLID_COLOURS.cover),
-  }
+  const solidMats = new Map<string, StandardMaterial>()
 
   let renderedSolids = 0
   for (const s of map.solids) {
@@ -62,7 +60,11 @@ export function buildMap(scene: Scene, map: GrayboxMap = GRAYBOX_MAP): RenderedM
       scene,
     )
     box.position.set((s.min.x + s.max.x) / 2, (s.min.y + s.max.y) / 2, (s.min.z + s.max.z) / 2)
-    box.material = solidMats[s.kind] ?? solidMats.wall
+    // Unknown kinds (a newer map) take the wall style.
+    const kind: SurfaceKind = (s.kind as string) in SURFACE_STYLE ? (s.kind as SurfaceKind) : 'wall'
+    let mat = solidMats.get(kind)
+    if (!mat) solidMats.set(kind, (mat = surfaceMaterial(scene, kind)))
+    box.material = mat
     box.isPickable = false
     box.freezeWorldMatrix()
     renderedSolids++
@@ -93,10 +95,6 @@ export interface RenderedTraversal {
   renderedAnchors: number
 }
 
-/** Upper-level slabs: a cool blue-grey, set apart from the neutral walls and cover. */
-const FLOOR_COLOUR = new Color3(0.4, 0.46, 0.55)
-/** Stairs: a warm tan, so the Warden route reads at a glance. */
-const RAMP_COLOUR = new Color3(0.55, 0.47, 0.34)
 /** Anchors: bright emissive cyan, readable in the dark (rule 7). */
 const ANCHOR_COLOUR = new Color3(0.1, 0.95, 1)
 const ANCHOR_GLOW = new Color3(0.05, 0.6, 0.65)
@@ -201,8 +199,8 @@ function buildLedgeMarker(scene: Scene, a: LedgeAnchor): Mesh {
  * bar along the edge for a ledge. Purely visual, like `buildMap`.
  */
 export function buildTraversal(scene: Scene, map: GrayboxMap = GRAYBOX_MAP): RenderedTraversal {
-  const floorMat = material(scene, 'floorMat', FLOOR_COLOUR)
-  const rampMat = material(scene, 'rampMat', RAMP_COLOUR)
+  const floorMat = surfaceMaterial(scene, 'floor')
+  const rampMat = surfaceMaterial(scene, 'ramp')
   const anchorMat = material(scene, 'anchorMat', ANCHOR_COLOUR, ANCHOR_GLOW)
   const finish = (mesh: Mesh, mat: StandardMaterial): void => {
     mesh.material = mat

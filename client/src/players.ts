@@ -4,10 +4,12 @@ import { CreateCylinder } from '@babylonjs/core/Meshes/Builders/cylinderBuilder'
 import { StandardMaterial } from '@babylonjs/core/Materials/standardMaterial'
 import { Color3 } from '@babylonjs/core/Maths/math.color'
 import type { Mesh } from '@babylonjs/core/Meshes/mesh'
+import { TransformNode } from '@babylonjs/core/Meshes/transformNode'
 import { PLAYER_HALF_SIZE, PLAYER_HEIGHT } from '../../shared/map.js'
 import type { Team } from '../../shared/protocol.js'
 import { isEliminated } from './vitals.ts'
 import type { PlayerPose, PlayerView } from './net.ts'
+import type { AssetLoader } from './assets/assetLoader.ts'
 
 /**
  * Graybox player shapes, built in code (no assets). Purely visual: they follow
@@ -25,7 +27,21 @@ import type { PlayerPose, PlayerView } from './net.ts'
  *
  * Mesh names: body `player-<id>`, nose `player-<id>-nose`. The body's
  * `metadata` is `{ team, isLocal }` (`PlayerMeshMetadata`).
+ *
+ * Visual models (M8, #79): when an `AssetLoader` is given, a Ghost or Warden
+ * body asks it for the model `character-<team>`. A loaded model becomes a
+ * `visual-<id>` TransformNode parented to the body (so it follows the body's
+ * position and yaw), all its meshes non-pickable. The graybox stays visible
+ * until the model is ready, then is hidden with `visibility = 0` (never
+ * `isVisible`, which the first-person code owns). If loading fails the graybox
+ * stays. A team change rebuilds the body, which drops the old model and
+ * loads the new team's.
  */
+
+/** Model id for a team's character. */
+export function characterModelId(team: Team): string {
+  return `character-${team}`
+}
 
 type ShapeKind = Team | 'unknown'
 
@@ -55,6 +71,8 @@ export interface PlayerMeshMetadata {
 export interface PlayerRenderer extends PlayerView {
   /** The body mesh of a player, if rendered (for tests and debugging). */
   mesh(id: string): Mesh | undefined
+  /** The `visual-<id>` node of a player whose model is attached, if any. */
+  visual(id: string): TransformNode | undefined
 }
 
 function material(scene: Scene, name: string, diffuse: Color3, emissive = Color3.Black()): StandardMaterial {
@@ -66,7 +84,7 @@ function material(scene: Scene, name: string, diffuse: Color3, emissive = Color3
   return mat
 }
 
-export function createPlayerRenderer(scene: Scene): PlayerRenderer {
+export function createPlayerRenderer(scene: Scene, loader?: AssetLoader): PlayerRenderer {
   const teamMats: Record<ShapeKind, StandardMaterial> = {
     ghost: material(scene, 'ghostMat', new Color3(0.3, 0.24, 0.46), new Color3(0.06, 0.04, 0.1)),
     warden: material(scene, 'wardenMat', new Color3(0.9, 0.45, 0.15)),
@@ -77,6 +95,7 @@ export function createPlayerRenderer(scene: Scene): PlayerRenderer {
   const noseMat = material(scene, 'noseMat', new Color3(1, 0.9, 0.3), new Color3(0.5, 0.45, 0.1))
 
   const bodies = new Map<string, Mesh>()
+  const visuals = new Map<string, TransformNode>()
 
   const build = (id: string, kind: ShapeKind, isLocal: boolean, eliminated: boolean): Mesh => {
     const width = BODY_WIDTH[kind]
@@ -99,6 +118,38 @@ export function createPlayerRenderer(scene: Scene): PlayerRenderer {
     return body
   }
 
+  /** Loads the team's model for `body` and attaches it; the graybox stays if that fails. */
+  const attachVisual = (id: string, body: Mesh, kind: Team, height: number): void => {
+    if (!loader) return
+    void loader.loadModel(characterModelId(kind)).then((model) => {
+      if (!model) return
+      // The body was removed, rebuilt (team change, elimination) or disposed meanwhile.
+      if (body.isDisposed() || bodies.get(id) !== body) {
+        model.dispose()
+        return
+      }
+      const visual = new TransformNode(`visual-${id}`, scene)
+      visual.parent = body
+      visual.position.y = -height / 2 // the body's origin is its centre; the model's is its feet
+      model.root.parent = visual
+      // Model nodes are named after this player, and never pickable.
+      for (const n of model.root.getDescendants(false)) n.name = `visual-${id}-${n.name}`
+      for (const m of model.root.getChildMeshes(false)) {
+        m.isPickable = false
+        m.isVisible = body.isVisible // your own body in first person stays hidden (scene.ts)
+      }
+      body.visibility = 0
+      for (const child of body.getChildMeshes(true)) {
+        if (child.name === `player-${id}-nose`) child.visibility = 0
+      }
+      body.onDisposeObservable.add(() => model.dispose())
+      visuals.set(id, visual)
+      body.onDisposeObservable.add(() => {
+        if (visuals.get(id) === visual) visuals.delete(id)
+      })
+    })
+  }
+
   const upsertPlayer = (id: string, x: number, z: number, isLocal = false, pose?: PlayerPose): void => {
     const kind: ShapeKind = pose?.team ?? 'unknown'
     const eliminated = pose?.health !== undefined && isEliminated(pose.health)
@@ -111,6 +162,7 @@ export function createPlayerRenderer(scene: Scene): PlayerRenderer {
     if (!body) {
       body = build(id, kind, isLocal, eliminated)
       bodies.set(id, body)
+      if (kind !== 'unknown' && !eliminated) attachVisual(id, body, kind, BODY_HEIGHT[kind])
     }
     body.position.x = x
     // Feet at the server's y (the body's origin is its centre).
@@ -126,5 +178,5 @@ export function createPlayerRenderer(scene: Scene): PlayerRenderer {
     bodies.delete(id)
   }
 
-  return { upsertPlayer, removePlayer, mesh: (id) => bodies.get(id) }
+  return { upsertPlayer, removePlayer, mesh: (id) => bodies.get(id), visual: (id) => visuals.get(id) }
 }

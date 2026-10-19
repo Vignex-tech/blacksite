@@ -10,6 +10,10 @@ import { createPlayerRenderer } from './players.ts'
 import { createCameraRig, type CameraRig } from './cameras.ts'
 import { createTerminalView, type TerminalView } from './terminalView.ts'
 import type { Mesh } from '@babylonjs/core/Meshes/mesh'
+import { createAssetLoader, type AssetLoader } from './assets/assetLoader.ts'
+import { gfxSettingsFor, type GfxSettings } from './graphics.ts'
+import { createLoadingScreen } from './loadingScreen.ts'
+import { createPerfMeter, type PerfMeter } from './perfOverlay.ts'
 
 /** Camera tilt from straight down (radians) and distance from the map centre. */
 const CAMERA_BETA = 0.4
@@ -24,6 +28,10 @@ export interface GameScene {
   traversal: RenderedTraversal
   /** Terminal post colours: active, dim, hacked (M6). */
   terminals: TerminalView
+  /** Graphics tier settings from `?gfx=` (rendering only, see graphics.ts). */
+  gfx: GfxSettings
+  /** Reads fps, draw calls and active triangles (the F3 overlay and the test hook). */
+  perf: PerfMeter
   /** Overhead, Ghost third-person or Warden first-person camera (cameras.ts). */
   camera: CameraRig
   /**
@@ -37,7 +45,14 @@ export interface GameScene {
   dispose(): void
 }
 
-export function createGameScene(canvas: HTMLCanvasElement): GameScene {
+export interface GameSceneOptions {
+  /** Model loader; defaults to the real one (shown on the loading screen). Tests inject their own. */
+  loader?: AssetLoader
+  /** Query string to read `?gfx=` from; defaults to `location.search`. */
+  search?: string
+}
+
+export function createGameScene(canvas: HTMLCanvasElement, options: GameSceneOptions = {}): GameScene {
   const engine = new Engine(canvas, true, { preserveDrawingBuffer: false, stencil: true })
   const scene = new Scene(engine)
   scene.clearColor = new Color4(0.05, 0.06, 0.08, 1)
@@ -61,7 +76,13 @@ export function createGameScene(canvas: HTMLCanvasElement): GameScene {
   const traversal = buildTraversal(scene)
   const terminals = createTerminalView(scene)
 
-  const players = createPlayerRenderer(scene)
+  const gfx = gfxSettingsFor(options.search ?? window.location.search)
+  const overlayParent = canvas.parentElement ?? document.body
+  const loadingScreen = createLoadingScreen(overlayParent)
+  const loader = options.loader ?? loadingScreen.track(createAssetLoader(scene))
+  const perf = createPerfMeter(engine, scene, overlayParent)
+
+  const players = createPlayerRenderer(scene, loader)
   const { upsertPlayer, removePlayer } = players
   const camera = createCameraRig(scene, canvas, overheadCamera)
 
@@ -93,12 +114,16 @@ export function createGameScene(canvas: HTMLCanvasElement): GameScene {
     map,
     traversal,
     terminals,
+    gfx,
+    perf,
     camera,
     upsertPlayer,
     removePlayer,
     dispose: () => {
       window.removeEventListener('resize', onResize)
       camera.dispose()
+      perf.dispose()
+      loadingScreen.dispose()
       engine.dispose()
     },
   }

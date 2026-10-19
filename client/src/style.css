@@ -277,3 +277,51 @@ body,
     padding: 0.3rem 0.5rem;
   }
 }
+
+/* Loading screen (M8, #79): never blocks input. */
+#loading {
+  position: absolute;
+  left: 50%;
+  bottom: 2rem;
+  transform: translateX(-50%);
+  width: min(20rem, 70%);
+  color: #ddd;
+  font-family: system-ui, sans-serif;
+  font-size: 0.85rem;
+  text-align: center;
+  pointer-events: none;
+}
+
+#loading[hidden] {
+  display: none;
+}
+
+#loading-bar {
+  margin-top: 0.35rem;
+  height: 0.4rem;
+  background: rgba(255, 255, 255, 0.15);
+  border-radius: 0.2rem;
+  overflow: hidden;
+}
+
+#loading-fill {
+  height: 100%;
+  width: 0;
+  background: #7fd0a0;
+  transition: width 0.15s;
+}
+
+/* Dev overlay (F3). */
+#perf {
+  position: absolute;
+  top: 0.75rem;
+  right: 1rem;
+  color: #9f9;
+  font-family: ui-monospace, monospace;
+  font-size: 0.8rem;
+  pointer-events: none;
+}
+
+#perf[hidden] {
+  display: none;
+}
