@@ -45,3 +45,14 @@ Not filed as issues unless noted. The owner decides when (and whether) they go i
 - **SDK log noise** (qa-build). `onMessage() not registered for type hackProgress` in e2e output; register `collectProgress` on every Ghost client to silence it (from #57).
 - **Second terminal and extraction** (Phase 2). Only `terminal-a` can be hacked; `terminal-b` is dim and inert (from #53).
 - **Warden alarm gives no direction** (design, Phase 2). The alarm is a text line only; sound cues come with Phase 2.
+
+## Follow-ups from Milestone 7 (#64)
+Not filed as issues. The owner decides when (and whether) they go into a milestone. Owners in brackets.
+
+- **Only the time-out result had real-tab coverage before #74** (qa-build). #73 covered time out in tabs; the hack and elimination results were SDK-only until the m7-gate added all three. Keep new outcomes covered in tabs (from #73, #74).
+- **The fast live window in m7-gate is tight** (qa-build). The fast preset's 30 s live window leaves about 9 s spare around the walk (about 10 s) and the 10 s hack. If a slow runner misses it, the failure names the phase reached. Consider a longer `fast` live time or a dedicated preset if it ever flakes (from #74).
+- **#76's fully-empty-events case is not fully explained** (qa-build). The fix (record on the Ghost already in the room) removes the join-time race, which reproduced as a missing first event 2 times in 10. CI showed an entirely empty list, which was never reproduced locally. 12 of 12 repeats pass; watch for recurrence (from #76).
+- **No spectator camera** (gameplay-engineer, server-engineer). An eliminated or sitting-out player sees a frozen grey body and the round timer until the next reset (from #64, #72).
+- **Rounds start automatically with no ready-up, scores or series** (design, Phase 5). A round starts as soon as each team has a player (from #64).
+- **Late listeners miss join-time messages** (gameplay-engineer or server-engineer). Both `hackProgress` and the first `round` event can be missed by a client that registers its listener after join. The client reads `state.round`, so the UI is unaffected; see the M6 item on `hackProgress` (from #76).
+

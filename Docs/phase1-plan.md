@@ -101,7 +101,8 @@ Milestones #1 (two tabs join one room and see each other move), #9 (graybox map,
 - **Gate:** a Ghost in range completes the hack in the configured time; out of range, as a Warden, or while hit, progress does not advance; a forged interact from across the map is rejected; a Warden client is never told the progress or the hacker.
 - **Not in M6:** the win, the round timer and the terminal reset (M7), the extraction step and the second active terminal (Phase 2).
 
-### Milestone 7: timed round, win and loss (tracking issue #64, issues #65 to #74)
+### Milestone 7: timed round, win and loss (tracking issue #64, issues #65 to #74, done, CI green on cfb4a71)
+- **Status:** done. Issues #65 to #74 plus bugs #75 and #76 are closed with green CI ([gate run](https://github.com/Vignex-tech/blacksite/actions/runs/39309864854)). Commits: b11d5bb and c987eb6 (#65), 866a123 (#66), 868fa34 (#67), d09049f (#68), 7770d1a (#69), a4b7e7e (#75), dcfbf5b (#70), ff499aa (#71), 52b0ca8 (#72), 4e37ee6 (#76), d45ebb0 (#73), cfb4a71 (#74). CI e2e is sharded into 4 jobs, slowest about 1.9 min. The main session approved all defaults while the owner was away. Follow-ups are in `Docs/backlog.md`.
 - **Goal:** a round starts, runs on a server timer (about 7 min live), ends with a winner and a visible result, and resets.
 - **Order:** first cut e2e time (#65). `shared/` next: phases, settings, result, round state (#66). Then qa-build readiness plus a second test server with short timers (#67), the server state machine (#68), win conditions and terminal reset (#70), then the client timer, banner and result screen (#72). A QA issue follows each, ending with the gate (#74).
 - **Run order (one agent at a time):**
