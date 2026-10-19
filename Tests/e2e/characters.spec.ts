@@ -90,6 +90,9 @@ test('character models: both teams load, stay readable and fit the draw-call bud
     expect([g0.localTeam, w0.localTeam]).toEqual(['ghost', 'warden'])
     await lockPointer(gt)
     await lockPointer(wt)
+    // Keys are camera-relative; headless Linux can deliver a stray first mouse move (see tabs.ts), so start from yaw 0.
+    await turnTo(gt, 0)
+    await turnTo(wt, 0)
 
     // Place both on x = 3: the Warden strafes there, the Ghost enters by the south door (x = 0) and strafes.
     // Closed loop: hold the key until the hook shows the target (frame rate on
@@ -139,7 +142,7 @@ test('character models: both teams load, stay readable and fit the draw-call bud
     // Wait for the three models to be fetched and attached.
     await expect.poll(() => gt.glb.length, { timeout: 15_000 }).toBeGreaterThanOrEqual(3)
     await expect.poll(() => wt.glb.length, { timeout: 15_000 }).toBeGreaterThanOrEqual(2)
-    await sleep(2500)
+    await sleep(1200)
 
     // Far: about 9 units apart.
     const far = Math.hypot(w.x - g.x, w.z - g.z)
@@ -159,7 +162,7 @@ test('character models: both teams load, stay readable and fit the draw-call bud
     await sleep(500)
     ;({ g, w } = await pos())
     await turnTo(wt, Math.atan2(g.x - w.x, g.z - w.z))
-    await sleep(1500)
+    await sleep(1000)
     const closeDist = Math.hypot(w.x - g.x, w.z - g.z)
     expect(closeDist).toBeLessThan(far - 2)
     const closeGhostView = await gt.page.screenshot({ path: join(REPORTS, 'art-warden-close-ghost-view.png') })
