@@ -48,6 +48,12 @@ export interface BlacksitePlayerSnapshot {
    * client hasn't received a valid mode for the player.
    */
   mode: MovementMode
+  /** Health as received from room state (M5, #39). Absent until received. */
+  health?: number
+  /** Magazine rounds as received from room state (M5, #39). Absent until received. */
+  ammo?: number
+  /** True while reloading, as received from room state (M5, #39). Absent until received. */
+  reloading?: boolean
 }
 
 /**

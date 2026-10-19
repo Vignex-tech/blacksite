@@ -76,3 +76,48 @@ export const ANCHOR_REACH = 0.6
 
 /** Which teams may climb and hang (rule 5: only on authored anchors). */
 export const CAN_CLIMB = Object.freeze({ ghost: true, warden: false })
+
+// Weapons and damage (M5, #39). Meanings and conventions are documented in
+// protocol.d.ts. Nothing reads these until the server applies them (#41).
+
+/** Message type the client sends to fire. Payload: FireMessage (aim only). */
+export const FIRE_MESSAGE = 'fire'
+
+/** Message type the client sends to reload. Payload ignored. */
+export const RELOAD_MESSAGE = 'reload'
+
+/** Starting and maximum health per team. A player is eliminated at health <= 0. */
+export const MAX_HEALTH = Object.freeze({ ghost: 100, warden: 150 })
+
+/**
+ * Weapon per team: warden rifle and ghost suppressed sidearm.
+ * damage per hit; intervalMs between shots; magazine rounds; reloadMs; range in u.
+ */
+export const WEAPONS = Object.freeze({
+  warden: Object.freeze({ name: 'rifle', damage: 25, intervalMs: 150, magazine: 30, reloadMs: 2000, range: 40 }),
+  ghost: Object.freeze({ name: 'suppressed sidearm', damage: 15, intervalMs: 300, magazine: 12, reloadMs: 1500, range: 25 }),
+})
+
+/** Height of the eye (shot origin) above the feet, in u. */
+export const EYE_HEIGHT = 1.6
+
+/** Whether shots hit teammates. */
+export const FRIENDLY_FIRE = false
+
+/** A Ghost within this 3D distance of a Warden is always visible to that Warden (used by #46), in u. */
+export const VISIBILITY_NEAR = 2.0
+
+/** Sustained rate of the shared fire/reload message bucket, per second. */
+export const FIRE_RATE_HZ = 10
+
+/** Burst size of the fire/reload message bucket. */
+export const FIRE_BURST = 3
+
+/** Server-to-client event: a shot was fired. Payload: ShotEvent. */
+export const SHOT_EVENT = 'shot'
+
+/** Server-to-client event, to the shooter: a shot hit a player. Payload: HitEvent. */
+export const HIT_EVENT = 'hit'
+
+/** Server-to-client event, to the victim: you were hurt. Payload: DamagedEvent. */
+export const DAMAGED_EVENT = 'damaged'

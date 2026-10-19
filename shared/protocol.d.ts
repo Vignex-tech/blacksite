@@ -81,6 +81,15 @@ export interface PlayerState {
   y: number
   /** Movement mode (M4, #27). Set by the server since #29; required since #33. */
   mode: MovementMode
+  /**
+   * Health (M5, #39): starts at `MAX_HEALTH[team]`. A player is eliminated
+   * when `health <= 0`; there is no separate field. Optional until #48.
+   */
+  health?: number
+  /** Rounds left in the magazine (M5). Optional until #48. */
+  ammo?: number
+  /** True while a reload is in progress (M5). Optional until #48. */
+  reloading?: boolean
 }
 
 /** Minimal read-only view of a map keyed by string (MapSchema satisfies it). */
@@ -192,3 +201,137 @@ export declare const ANCHOR_REACH: 0.6
 
 /** Which teams may climb and hang, frozen: `{ ghost: true, warden: false }`. */
 export declare const CAN_CLIMB: Readonly<Record<Team, boolean>>
+
+// ---------------------------------------------------------------------------
+// Weapons and damage (M5, #39). Runtime values live in protocol.js. Nothing
+// reads them until the server applies them (#41). Each constant is changeable
+// in protocol.js, and only there (owner decisions on #38).
+
+/** Message type the client sends to fire. Payload: FireMessage. */
+export declare const FIRE_MESSAGE: 'fire'
+
+/** Message type the client sends to reload. Payload is ignored. */
+export declare const RELOAD_MESSAGE: 'reload'
+
+/**
+ * Payload of the "fire" message: aim only. There is no origin, target or hit
+ * claim; the server shoots from the player's own server eye position
+ * (`EYE_HEIGHT` above the feet).
+ *
+ * - `yaw`: radians, same convention as `MoveMessage.yaw` (0 faces +z,
+ *   positive turns toward +x).
+ * - `pitch`: radians, positive looks up, negative looks down.
+ *
+ * Server validation: `fire` is ignored unless the payload is a non-array
+ * object with finite `yaw` and `pitch`. The server wraps yaw into -pi..pi and
+ * clamps pitch to -pi/2..pi/2. It never trusts the client for origin, hits,
+ * ammo or timing: cooldown, magazine, range and walls are all decided by the
+ * server. Fire and reload share one rate-limit bucket (`FIRE_RATE_HZ`,
+ * `FIRE_BURST`).
+ */
+export interface FireMessage {
+  yaw: number
+  pitch: number
+}
+
+/**
+ * Payload of the "reload" message. It is ignored; the server only needs it
+ * to be an object. The server decides whether a reload starts and when it
+ * ends (`WEAPONS[team].reloadMs`).
+ */
+export type ReloadMessage = Record<string, never>
+
+/** Max health per team, frozen: `{ ghost: 100, warden: 150 }`. No regeneration. */
+export declare const MAX_HEALTH: Readonly<Record<Team, number>>
+
+/** A team's weapon. Times in ms, distances in u. */
+export interface Weapon {
+  name: string
+  /** Health removed per hit. */
+  damage: number
+  /** Minimum time between shots. */
+  intervalMs: number
+  /** Rounds per magazine. Reserve ammo is unlimited; there is no auto-reload. */
+  magazine: number
+  /** Time a reload takes. */
+  reloadMs: number
+  /** Longest distance a shot can hit. */
+  range: number
+}
+
+/**
+ * Weapon per team, frozen. Warden rifle: 25 damage, 150 ms, 30 rounds, 2000 ms
+ * reload, range 40. Ghost suppressed sidearm: 15, 300 ms, 12, 1500 ms, 25.
+ */
+export declare const WEAPONS: Readonly<Record<Team, Weapon>>
+
+/** Height of the eye (shot origin) above the feet: 1.6 u. */
+export declare const EYE_HEIGHT: 1.6
+
+/** Whether shots hit teammates: false. Shots pass through teammates. */
+export declare const FRIENDLY_FIRE: false
+
+/** A Ghost this close (3D, box centres) to a Warden is always sent to it: 2.0 u (used by #46). */
+export declare const VISIBILITY_NEAR: 2
+
+/** Sustained rate of the fire/reload message bucket: 10 per second. */
+export declare const FIRE_RATE_HZ: 10
+
+/** Burst size of the fire/reload message bucket: 3. */
+export declare const FIRE_BURST: 3
+
+/** A 3D point in world units. */
+export interface ShotPoint {
+  x: number
+  y: number
+  z: number
+}
+
+/** Server-to-client event name for a shot. Payload: ShotEvent. */
+export declare const SHOT_EVENT: 'shot'
+
+/**
+ * A shot was fired. Sent to everyone for a Warden shot (the rifle is loud),
+ * and only to Ghost clients for a Ghost shot (suppressed; never to Wardens).
+ */
+export interface ShotEvent {
+  /** Shooter's session id. */
+  shooter: string
+  /** Shooter's team. */
+  team: Team
+  /** Where the shot started (the shooter's eye). */
+  origin: ShotPoint
+  /** Where it ended: the hit point, the wall it struck, or the range limit. */
+  end: ShotPoint
+  /** True if it hit a player. */
+  hit: boolean
+}
+
+/** Server-to-client event name for a confirmed hit. Payload: HitEvent. */
+export declare const HIT_EVENT: 'hit'
+
+/** Sent to the shooter only: a shot hit a player. */
+export interface HitEvent {
+  /** Session id of the player hit. */
+  target: string
+  /** Health removed. */
+  damage: number
+  /** True if the hit eliminated the target. */
+  killed: boolean
+}
+
+/** Server-to-client event name for a damage notice. Payload: DamagedEvent. */
+export declare const DAMAGED_EVENT: 'damaged'
+
+/**
+ * Sent to the victim only. It carries no shooter id and no position, so it
+ * leaks nothing about where the shot came from (rule 2).
+ */
+export interface DamagedEvent {
+  /** Health removed. */
+  damage: number
+  /** Health left after the hit. */
+  health: number
+  /** True if this hit eliminated the victim. */
+  killed: boolean
+}
