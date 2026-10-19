@@ -10,8 +10,8 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  build-and-test:
-    name: build-and-test
+  checks:
+    name: build, server tests, unit tests
     runs-on: ubuntu-latest
     env:
       CI: true
