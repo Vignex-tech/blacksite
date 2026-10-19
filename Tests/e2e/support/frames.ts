@@ -15,7 +15,7 @@
 // change of wire format fails loudly instead of being misread.
 
 import type { Page } from '@playwright/test'
-import { ACTION_MESSAGE, MOVE_MESSAGE } from '../../../shared/protocol.js'
+import { ACTION_MESSAGE, FIRE_MESSAGE, MOVE_MESSAGE, RELOAD_MESSAGE } from '../../../shared/protocol.js'
 
 /** Colyseus protocol code for a room message sent with room.send(type, payload). */
 export const ROOM_DATA = 13
@@ -185,8 +185,22 @@ export interface SentAction {
   keys: string[]
 }
 
+/** One fire message as sent by a tab (#51). Payload keys are kept to check there is nothing but yaw and pitch. */
+export interface SentFire {
+  t: number
+  yaw: unknown
+  pitch: unknown
+  keys: string[]
+}
+
+/** One reload message as sent by a tab (#51), with the Node time it was seen. */
+export interface SentReload {
+  t: number
+  keys: string[]
+}
+
 /**
- * Records every "move" and "action" message the page sends, from now on.
+ * Records every "move", "action", "fire" and "reload" message the page sends, from now on.
  * Call before page.goto so the room's socket is captured. Frames that aren't
  * room messages, or are other room messages, are ignored; a room message
  * that can't be decoded is kept in `errors`, so tests can fail on it.
@@ -194,11 +208,15 @@ export interface SentAction {
 export function captureMoves(page: Page): {
   moves: SentMove[]
   actions: SentAction[]
+  fires: SentFire[]
+  reloads: SentReload[]
   errors: string[]
   since(t: number): SentMove[]
 } {
   const moves: SentMove[] = []
   const actions: SentAction[] = []
+  const fires: SentFire[] = []
+  const reloads: SentReload[] = []
   const errors: string[] = []
   page.on('websocket', (ws) => {
     ws.on('framesent', (f) => {
@@ -206,15 +224,17 @@ export function captureMoves(page: Page): {
       const bytes = typeof f.payload === 'string' ? new TextEncoder().encode(f.payload) : new Uint8Array(f.payload)
       try {
         const m = decodeRoomMessage(bytes)
-        if (!m || (m.type !== MOVE_MESSAGE && m.type !== ACTION_MESSAGE)) return
+        if (!m || ![MOVE_MESSAGE, ACTION_MESSAGE, FIRE_MESSAGE, RELOAD_MESSAGE].includes(m.type as string)) return
         const p = m.payload as Record<string, unknown>
         if (!p || typeof p !== 'object' || Array.isArray(p)) throw new Error(`${String(m.type)} payload is ${JSON.stringify(p)}`)
-        if (m.type === ACTION_MESSAGE) actions.push({ t, action: p.action, keys: Object.keys(p).sort() })
+        if (m.type === FIRE_MESSAGE) fires.push({ t, yaw: p.yaw, pitch: p.pitch, keys: Object.keys(p).sort() })
+        else if (m.type === RELOAD_MESSAGE) reloads.push({ t, keys: Object.keys(p).sort() })
+        else if (m.type === ACTION_MESSAGE) actions.push({ t, action: p.action, keys: Object.keys(p).sort() })
         else moves.push({ t, dx: p.dx, dz: p.dz, yaw: p.yaw, keys: Object.keys(p).sort() })
       } catch (err) {
         errors.push(`${(err as Error).message} in frame ${Buffer.from(bytes).toString('hex')}`)
       }
     })
   })
-  return { moves, actions, errors, since: (t) => moves.filter((m) => m.t >= t) }
+  return { moves, actions, fires, reloads, errors, since: (t) => moves.filter((m) => m.t >= t) }
 }
