@@ -23,7 +23,7 @@ import type { CameraMode } from '../../shared/testhook.js'
 
 /** Radians of turn per pixel of mouse movement. */
 const MOUSE_SENSITIVITY = 0.0025
-/** First person: eye height above the ground. */
+/** First person: eye height above the player's feet (its server y). */
 const EYE_HEIGHT = 1.6
 const FIRST_PERSON_PITCH = { min: -1.4, max: 1.4 }
 /** Third person: the point the camera orbits, relative to the player's feet. */
@@ -34,6 +34,8 @@ const THIRD_PERSON_DISTANCE = 3.2
 /** Third person starts looking slightly down at the player. */
 const THIRD_PERSON_START_PITCH = 0.25
 const THIRD_PERSON_PITCH = { min: -0.5, max: 1.0 }
+/** Third person: the camera never goes below this height (the ground). */
+const MIN_CAMERA_HEIGHT = 0.3
 
 const MODE_FOR_TEAM: Record<Team, CameraMode> = { ghost: 'third-person', warden: 'first-person' }
 
@@ -50,10 +52,11 @@ export interface CameraRig {
   /** Camera yaw in radians (wrapped to -pi..pi); 0 in overhead mode. */
   readonly yaw: number
   /**
-   * Your own player as received from server state. The first call with a
-   * known team switches to that team's camera, starting at `serverYaw`.
+   * Your own player as received from server state (`y` is its feet height,
+   * 0 if omitted). The first call with a known team switches to that team's
+   * camera, starting at `serverYaw`. The shoulder point and the eye follow `y`.
    */
-  setLocalPlayer(id: string, x: number, z: number, team: Team | null, serverYaw: number): void
+  setLocalPlayer(id: string, x: number, z: number, team: Team | null, serverYaw: number, y?: number): void
   /** Back to the overhead camera (disconnected). */
   reset(): void
   /** The local player's id while a team camera is active (its mesh may be hidden). */
@@ -78,7 +81,7 @@ export function createCameraRig(scene: Scene, canvas: HTMLCanvasElement, overhea
     if (mode === 'overhead') return
     eye.rotation.set(pitch, yaw, 0)
     if (mode === 'first-person') {
-      eye.position.set(pos.x, EYE_HEIGHT, pos.z)
+      eye.position.set(pos.x, pos.y + EYE_HEIGHT, pos.z)
       return
     }
     // Orbit the right-shoulder point, looking along (yaw, pitch).
@@ -90,7 +93,7 @@ export function createCameraRig(scene: Scene, canvas: HTMLCanvasElement, overhea
     const pivotZ = pos.z - Math.sin(yaw) * SHOULDER_RIGHT
     eye.position.set(
       pivotX - lookX * THIRD_PERSON_DISTANCE,
-      Math.max(0.3, SHOULDER_HEIGHT - lookY * THIRD_PERSON_DISTANCE),
+      Math.max(MIN_CAMERA_HEIGHT, pos.y + SHOULDER_HEIGHT - lookY * THIRD_PERSON_DISTANCE),
       pivotZ - lookZ * THIRD_PERSON_DISTANCE,
     )
   }
@@ -136,8 +139,8 @@ export function createCameraRig(scene: Scene, canvas: HTMLCanvasElement, overhea
     get localId() {
       return mode === 'overhead' ? null : localId
     },
-    setLocalPlayer(id, x, z, team, serverYaw) {
-      pos.set(x, 0, z)
+    setLocalPlayer(id, x, z, team, serverYaw, y = 0) {
+      pos.set(x, Number.isFinite(y) ? y : 0, z)
       if (mode === 'overhead' && team) {
         // Start the team camera at the player's server facing.
         localId = id

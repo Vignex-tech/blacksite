@@ -18,7 +18,8 @@ import type { PlayerPose, PlayerView } from './net.ts'
  *
  * Each body has a bright "nose" child at head height on its local +z, and
  * the body's `rotation.y` is the synced yaw, so the nose points where the
- * player faces (yaw 0 faces +z). Your own player has a blue tint whatever its
+ * player faces (yaw 0 faces +z). The feet are at the synced `y` (M4), in
+ * every movement mode; nothing is predicted locally. Your own player has a blue tint whatever its
  * team; the others use their team colour.
  *
  * Mesh names: body `player-<id>`, nose `player-<id>-nose`. The body's
@@ -104,6 +105,8 @@ export function createPlayerRenderer(scene: Scene): PlayerRenderer {
       bodies.set(id, body)
     }
     body.position.x = x
+    // Feet at the server's y (the body's origin is its centre).
+    body.position.y = (pose?.y ?? 0) + BODY_HEIGHT[kind] / 2
     body.position.z = z
     body.rotation.y = pose?.yaw ?? 0
   }

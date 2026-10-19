@@ -10,11 +10,12 @@
 //   client was sent). It never adds a server message or synced state.
 // - It ships in the production build, because Playwright tests client/dist.
 // - Versioning: fields are only ever added in version 1 (#22 added `team`,
-//   `yaw` and `localTeam`; #24 added `camera`). `version` is bumped only if a field is removed or
+//   `yaw` and `localTeam`; #24 added `camera`; #33 added `y` and `mode` per
+//   player and `renderedFloors`, `renderedRamps` and `renderedAnchors`). `version` is bumped only if a field is removed or
 //   changes meaning, so tests should match the fields they need, not the
 //   exact shape.
 
-import type { Team } from './protocol.js'
+import type { MovementMode, Team } from './protocol.js'
 
 /** One player as the client currently knows it from room state. */
 export interface BlacksitePlayerSnapshot {
@@ -36,6 +37,17 @@ export interface BlacksitePlayerSnapshot {
    * received.
    */
   yaw: number
+  /**
+   * Feet height as received from room state (#33; float32 on the wire): 0 on
+   * the ground floor, 3 on the upper level, 1.2 while hanging. 0 only if this
+   * client hasn't received a finite y for the player.
+   */
+  y: number
+  /**
+   * Movement mode as received from room state (#33). 'ground' only if this
+   * client hasn't received a valid mode for the player.
+   */
+  mode: MovementMode
 }
 
 /**
@@ -67,8 +79,18 @@ export interface BlacksiteSnapshot {
   players: BlacksitePlayerSnapshot[]
   /** This client's own team once received from room state, otherwise null. */
   localTeam: Team | null
-  /** Rendered map. `{ id: null, renderedSolids: 0 }` until the map is rendered (#14). */
-  map: { id: string | null; renderedSolids: number }
+  /**
+   * Rendered map. `id` null and every count 0 until the map is rendered (#14).
+   * Counts are meshes created: one per solid, and (#33) one per floor
+   * (`floor-<id>`), ramp (`ramp-<id>`) and anchor (`anchor-<id>`).
+   */
+  map: {
+    id: string | null
+    renderedSolids: number
+    renderedFloors: number
+    renderedRamps: number
+    renderedAnchors: number
+  }
   /**
    * The client's camera. Present once the game scene (and so a camera) exists;
    * absent if WebGL failed to start.

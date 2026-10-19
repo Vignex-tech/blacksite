@@ -75,15 +75,12 @@ export interface PlayerState {
   yaw: number
   /**
    * Feet height in world units (M4, #27): 0 on the ground floor,
-   * `UPPER_LEVEL_Y` (3) on the upper level. Optional until the client issue
-   * (#33) makes it required; a missing value means 0.
+   * `UPPER_LEVEL_Y` (3) on the upper level. Set by the server since #29;
+   * required since #33.
    */
-  y?: number
-  /**
-   * Movement mode (M4, #27). Optional until #33 makes it required; a missing
-   * value means `'ground'`.
-   */
-  mode?: MovementMode
+  y: number
+  /** Movement mode (M4, #27). Set by the server since #29; required since #33. */
+  mode: MovementMode
 }
 
 /** Minimal read-only view of a map keyed by string (MapSchema satisfies it). */

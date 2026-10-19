@@ -4,7 +4,7 @@ import { ArcRotateCamera } from '@babylonjs/core/Cameras/arcRotateCamera'
 import { HemisphericLight } from '@babylonjs/core/Lights/hemisphericLight'
 import { Color4 } from '@babylonjs/core/Maths/math.color'
 import { Vector3 } from '@babylonjs/core/Maths/math.vector'
-import { buildMap, type RenderedMap } from './map.ts'
+import { buildMap, buildTraversal, type RenderedMap, type RenderedTraversal } from './map.ts'
 import type { PlayerPose } from './net.ts'
 import { createPlayerRenderer } from './players.ts'
 import { createCameraRig, type CameraRig } from './cameras.ts'
@@ -19,11 +19,13 @@ export interface GameScene {
   scene: Scene
   /** The map built from shared data (id and number of solid meshes). */
   map: RenderedMap
+  /** The upper level built from shared data (floors, ramps and anchors, M4). */
+  traversal: RenderedTraversal
   /** Overhead, Ghost third-person or Warden first-person camera (cameras.ts). */
   camera: CameraRig
   /**
    * Create the player's shape if needed (per team, see players.ts), then move
-   * it to (x, z) on the ground and turn it to `pose.yaw`. `isLocal` picks the
+   * it to (x, z) with its feet at `pose.y` and turn it to `pose.yaw`. `isLocal` picks the
    * local player's tint when the shape is created.
    */
   upsertPlayer(id: string, x: number, z: number, isLocal?: boolean, pose?: PlayerPose): void
@@ -53,6 +55,7 @@ export function createGameScene(canvas: HTMLCanvasElement): GameScene {
   light.intensity = 0.9
 
   const map = buildMap(scene)
+  const traversal = buildTraversal(scene)
 
   const players = createPlayerRenderer(scene)
   const { upsertPlayer, removePlayer } = players
@@ -84,6 +87,7 @@ export function createGameScene(canvas: HTMLCanvasElement): GameScene {
     engine,
     scene,
     map,
+    traversal,
     camera,
     upsertPlayer,
     removePlayer,

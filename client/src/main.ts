@@ -46,7 +46,7 @@ try {
 }
 
 if (game) {
-  testHook.setMap(game.map.id, game.map.renderedSolids)
+  testHook.setMap(game.map.id, game.map.renderedSolids, game.traversal)
   const rig = game.camera
   testHook.setCamera(() => ({ mode: rig.mode, yaw: rig.yaw }))
   start(game)
@@ -102,7 +102,7 @@ function start(view: GameScene): void {
     upsertPlayer(id, x, z, isLocal = false, pose) {
       inner.upsertPlayer(id, x, z, isLocal, pose)
       // The camera follows your own player's server position only.
-      if (isLocal) rig.setLocalPlayer(id, x, z, pose?.team ?? null, pose?.yaw ?? 0)
+      if (isLocal) rig.setLocalPlayer(id, x, z, pose?.team ?? null, pose?.yaw ?? 0, pose?.y ?? 0)
       if (isLocal && pose && pose.team !== localTeam) {
         localTeam = pose.team
         if (room) showOnline()

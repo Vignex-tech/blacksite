@@ -1,5 +1,14 @@
 import { Callbacks, Client, type Room } from '@colyseus/sdk'
-import { MOVE_MESSAGE, ROOM_NAME, TEAMS, type MoveMessage, type PlayerState, type Team } from '../../shared/protocol.js'
+import {
+  MOVE_MESSAGE,
+  MOVEMENT_MODES,
+  ROOM_NAME,
+  TEAMS,
+  type MoveMessage,
+  type MovementMode,
+  type PlayerState,
+  type Team,
+} from '../../shared/protocol.js'
 
 /** Port the Colyseus server listens on by default (server/src/index.ts). */
 const SERVER_PORT = 2567
@@ -21,12 +30,16 @@ export function serverUrl(loc: Location = location): string {
   return `${protocol}//${host}`
 }
 
-/** Team and facing of a player as received from room state. */
+/** Team, facing, height and movement mode of a player as received from room state. */
 export interface PlayerPose {
   /** null if the state holds no valid team (yet). */
   team: Team | null
   /** Radians, 0 faces +z (0 if the state holds no finite yaw yet). */
   yaw: number
+  /** Feet height (M4). Treated as 0 when omitted. */
+  y?: number
+  /** Movement mode (M4). Treated as 'ground' when omitted. */
+  mode?: MovementMode
 }
 
 export interface PlayerView {
@@ -35,11 +48,17 @@ export interface PlayerView {
   removePlayer(id: string): void
 }
 
-/** Reads team and yaw from a synced player, tolerating missing or unknown values. */
+const finiteOr = (v: unknown, fallback: number): number =>
+  typeof v === 'number' && Number.isFinite(v) ? v : fallback
+
+/**
+ * Reads team, yaw, y and mode from a synced player, tolerating missing or
+ * unknown values (team null, yaw 0, y 0, mode 'ground').
+ */
 export function poseOf(player: PlayerState): PlayerPose {
   const team = (TEAMS as readonly string[]).includes(player.team) ? player.team : null
-  const yaw = typeof player.yaw === 'number' && Number.isFinite(player.yaw) ? player.yaw : 0
-  return { team, yaw }
+  const mode = (MOVEMENT_MODES as readonly string[]).includes(player.mode) ? player.mode : 'ground'
+  return { team, yaw: finiteOr(player.yaw, 0), y: finiteOr(player.y, 0), mode }
 }
 
 /** Joins the shared room and mirrors `state.players` into the view. Rejects if joining fails. */
