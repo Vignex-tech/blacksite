@@ -1,6 +1,7 @@
 import type { BlacksiteCameraSnapshot, BlacksiteSnapshot, BlacksiteTestHook } from '../../shared/testhook.js'
 import type { MovementMode, Team } from '../../shared/protocol.js'
-import type { PlayerView } from './net.ts'
+import type { PlayerPose, PlayerView } from './net.ts'
+import { defaultVitals } from './vitals.ts'
 
 /**
  * Read-only test hook on `window.__blacksite` (types in shared/testhook.d.ts).
@@ -43,6 +44,14 @@ interface PlayerRecord {
   team: Team | null
   yaw: number
   mode: MovementMode
+  health: number
+  ammo: number
+  reloading: boolean
+}
+
+function vitalsOf(pose: PlayerPose | undefined): { health: number; ammo: number; reloading: boolean } {
+  const d = defaultVitals(pose?.team ?? null)
+  return { health: pose?.health ?? d.health, ammo: pose?.ammo ?? d.ammo, reloading: pose?.reloading ?? d.reloading }
 }
 
 export function installTestHook(target: Window = window): TestHookRecorder {
@@ -71,6 +80,9 @@ export function installTestHook(target: Window = window): TestHookRecorder {
             yaw: p.yaw,
             y: p.y,
             mode: p.mode,
+            health: p.health,
+            ammo: p.ammo,
+            reloading: p.reloading,
           })),
         localTeam: [...players.values()].find((p) => p.isLocal)?.team ?? null,
         map: {
@@ -108,6 +120,7 @@ export function installTestHook(target: Window = window): TestHookRecorder {
           team: pose?.team ?? null,
           yaw: pose?.yaw ?? 0,
           mode: pose?.mode ?? 'ground',
+          ...vitalsOf(pose),
         })
         // Forward exactly the arguments received (no trailing undefined).
         if (pose) view.upsertPlayer(id, x, z, isLocal, pose)

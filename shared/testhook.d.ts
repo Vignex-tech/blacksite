@@ -12,7 +12,7 @@
 // - Versioning: fields are only ever added in version 1 (#22 added `team`,
 //   `yaw` and `localTeam`; #24 added `camera`; #33 added `y` and `mode` per
 //   player and `renderedFloors`, `renderedRamps` and `renderedAnchors`). `version` is bumped only if a field is removed or
-//   changes meaning, so tests should match the fields they need, not the
+//   changes meaning (#48 made `health`, `ammo` and `reloading` always present), so tests should match the fields they need, not the
 //   exact shape.
 
 import type { MovementMode, Team } from './protocol.js'
@@ -48,12 +48,12 @@ export interface BlacksitePlayerSnapshot {
    * client hasn't received a valid mode for the player.
    */
   mode: MovementMode
-  /** Health as received from room state (M5, #39). Absent until received. */
-  health?: number
-  /** Magazine rounds as received from room state (M5, #39). Absent until received. */
-  ammo?: number
-  /** True while reloading, as received from room state (M5, #39). Absent until received. */
-  reloading?: boolean
+  /** Health as received from room state (M5; always present since #48; a safe default if the state held none). `<= 0` means eliminated. */
+  health: number
+  /** Magazine rounds as received from room state (M5, #39). Always present since #48. */
+  ammo: number
+  /** True while reloading, as received from room state (M5, #39). Always present since #48. */
+  reloading: boolean
 }
 
 /**

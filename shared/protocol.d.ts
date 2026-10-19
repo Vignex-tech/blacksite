@@ -83,13 +83,13 @@ export interface PlayerState {
   mode: MovementMode
   /**
    * Health (M5, #39): starts at `MAX_HEALTH[team]`. A player is eliminated
-   * when `health <= 0`; there is no separate field. Optional until #48.
+   * when `health <= 0`; there is no separate field. Required since #48.
    */
-  health?: number
-  /** Rounds left in the magazine (M5). Optional until #48. */
-  ammo?: number
-  /** True while a reload is in progress (M5). Optional until #48. */
-  reloading?: boolean
+  health: number
+  /** Rounds left in the magazine (M5). Required since #48. */
+  ammo: number
+  /** True while a reload is in progress (M5). Required since #48. */
+  reloading: boolean
 }
 
 /** Minimal read-only view of a map keyed by string (MapSchema satisfies it). */

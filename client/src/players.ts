@@ -6,6 +6,7 @@ import { Color3 } from '@babylonjs/core/Maths/math.color'
 import type { Mesh } from '@babylonjs/core/Meshes/mesh'
 import { PLAYER_HALF_SIZE, PLAYER_HEIGHT } from '../../shared/map.js'
 import type { Team } from '../../shared/protocol.js'
+import { isEliminated } from './vitals.ts'
 import type { PlayerPose, PlayerView } from './net.ts'
 
 /**
@@ -39,12 +40,16 @@ const BODY_HEIGHT: Record<ShapeKind, number> = {
   warden: PLAYER_HEIGHT,
   unknown: PLAYER_HALF_SIZE * 2,
 }
+/** An eliminated body lies flat: this tall. */
+const FLAT_HEIGHT = 0.3
 const NOSE_SIZE = 0.25
 const NOSE_LENGTH = 0.4
 
 export interface PlayerMeshMetadata {
   team: Team | null
   isLocal: boolean
+  /** Present (true) only when received health is 0 or less: the body is drawn flat and grey. */
+  eliminated?: true
 }
 
 export interface PlayerRenderer extends PlayerView {
@@ -68,24 +73,26 @@ export function createPlayerRenderer(scene: Scene): PlayerRenderer {
     unknown: material(scene, 'unknownPlayerMat', new Color3(0.8, 0.8, 0.8)),
   }
   const localMat = material(scene, 'localPlayerMat', new Color3(0.2, 0.75, 0.95), new Color3(0.05, 0.2, 0.3))
+  const deadMat = material(scene, 'eliminatedMat', new Color3(0.32, 0.32, 0.34))
   const noseMat = material(scene, 'noseMat', new Color3(1, 0.9, 0.3), new Color3(0.5, 0.45, 0.1))
 
   const bodies = new Map<string, Mesh>()
 
-  const build = (id: string, kind: ShapeKind, isLocal: boolean): Mesh => {
+  const build = (id: string, kind: ShapeKind, isLocal: boolean, eliminated: boolean): Mesh => {
     const width = BODY_WIDTH[kind]
-    const height = BODY_HEIGHT[kind]
+    const height = eliminated ? FLAT_HEIGHT : BODY_HEIGHT[kind]
     const body =
-      kind === 'ghost'
+      kind === 'ghost' && !eliminated
         ? CreateCylinder(`player-${id}`, { height, diameter: width, tessellation: 16 }, scene)
         : CreateBox(`player-${id}`, { width, height, depth: width }, scene)
-    body.material = isLocal ? localMat : teamMats[kind]
+    body.material = eliminated ? deadMat : isLocal ? localMat : teamMats[kind]
     body.position.y = height / 2
     const metadata: PlayerMeshMetadata = { team: kind === 'unknown' ? null : kind, isLocal }
+    if (eliminated) metadata.eliminated = true
     body.metadata = metadata
 
     const nose = CreateBox(`player-${id}-nose`, { width: NOSE_SIZE, height: NOSE_SIZE, depth: NOSE_LENGTH }, scene)
-    nose.material = noseMat
+    nose.material = eliminated ? deadMat : noseMat
     nose.parent = body
     // Sticks out of the body's front (+z) near the top.
     nose.position.set(0, height / 2 - NOSE_SIZE, width / 2 + NOSE_LENGTH / 2 - NOSE_SIZE / 2)
@@ -94,19 +101,20 @@ export function createPlayerRenderer(scene: Scene): PlayerRenderer {
 
   const upsertPlayer = (id: string, x: number, z: number, isLocal = false, pose?: PlayerPose): void => {
     const kind: ShapeKind = pose?.team ?? 'unknown'
+    const eliminated = pose?.health !== undefined && isEliminated(pose.health)
     let body = bodies.get(id)
     const meta = body?.metadata as PlayerMeshMetadata | undefined
-    if (body && (meta?.team ?? 'unknown') !== kind) {
-      body.dispose() // team arrived or changed: rebuild with the right shape
+    if (body && ((meta?.team ?? 'unknown') !== kind || (meta?.eliminated === true) !== eliminated)) {
+      body.dispose() // team arrived or changed, or eliminated: rebuild with the right shape
       body = undefined
     }
     if (!body) {
-      body = build(id, kind, isLocal)
+      body = build(id, kind, isLocal, eliminated)
       bodies.set(id, body)
     }
     body.position.x = x
     // Feet at the server's y (the body's origin is its centre).
-    body.position.y = (pose?.y ?? 0) + BODY_HEIGHT[kind] / 2
+    body.position.y = (pose?.y ?? 0) + (eliminated ? FLAT_HEIGHT : BODY_HEIGHT[kind]) / 2
     body.position.z = z
     body.rotation.y = pose?.yaw ?? 0
   }

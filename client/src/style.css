@@ -69,3 +69,40 @@ body,
   pointer-events: none;
   user-select: none;
 }
+
+#health,
+#ammo {
+  position: absolute;
+  bottom: 1rem;
+  color: #ddd;
+  font-family: system-ui, sans-serif;
+  font-size: 1rem;
+  text-shadow: 0 0 4px #000;
+  pointer-events: none;
+  user-select: none;
+}
+
+#health {
+  left: 1rem;
+}
+
+#ammo {
+  right: 1rem;
+}
+
+#crosshair {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 6px;
+  height: 6px;
+  margin: -3px 0 0 -3px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 0 3px #000;
+  pointer-events: none;
+}
+
+#crosshair[hidden] {
+  display: none;
+}

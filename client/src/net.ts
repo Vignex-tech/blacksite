@@ -11,6 +11,7 @@ import {
   type PlayerState,
   type Team,
 } from '../../shared/protocol.js'
+import { defaultVitals } from './vitals.ts'
 
 /** Port the Colyseus server listens on by default (server/src/index.ts). */
 const SERVER_PORT = 2567
@@ -42,6 +43,10 @@ export interface PlayerPose {
   y?: number
   /** Movement mode (M4). Treated as 'ground' when omitted. */
   mode?: MovementMode
+  /** Health, ammo and reload flag (M5, #48). Safe defaults when the state holds none. */
+  health?: number
+  ammo?: number
+  reloading?: boolean
 }
 
 export interface PlayerView {
@@ -60,7 +65,16 @@ const finiteOr = (v: unknown, fallback: number): number =>
 export function poseOf(player: PlayerState): PlayerPose {
   const team = (TEAMS as readonly string[]).includes(player.team) ? player.team : null
   const mode = (MOVEMENT_MODES as readonly string[]).includes(player.mode) ? player.mode : 'ground'
-  return { team, yaw: finiteOr(player.yaw, 0), y: finiteOr(player.y, 0), mode }
+  const d = defaultVitals(team)
+  return {
+    team,
+    yaw: finiteOr(player.yaw, 0),
+    y: finiteOr(player.y, 0),
+    mode,
+    health: finiteOr(player.health, d.health),
+    ammo: finiteOr(player.ammo, d.ammo),
+    reloading: typeof player.reloading === 'boolean' ? player.reloading : d.reloading,
+  }
 }
 
 /** Joins the shared room and mirrors `state.players` into the view. Rejects if joining fails. */

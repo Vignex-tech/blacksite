@@ -7,6 +7,7 @@ import type { Team } from '../../shared/protocol.js'
 import type { Room } from '@colyseus/sdk'
 import { installTestHook } from './testHook.ts'
 import { wrapAngle } from './cameras.ts'
+import { ammoText, crosshairVisible, healthText, type LocalVitals } from './vitals.ts'
 
 /** How often a held movement key sends a "move" message. */
 const MOVE_SEND_HZ = 20
@@ -70,6 +71,27 @@ function start(view: GameScene): void {
   const prompt = document.createElement('div')
   prompt.id = 'climb-prompt'
   app.appendChild(prompt)
+  // Health and ammo readouts and the crosshair (#48): display only, from the
+  // local player's received state. Empty before it arrives and after disconnect.
+  const healthLine = document.createElement('div')
+  healthLine.id = 'health'
+  app.appendChild(healthLine)
+  const ammoLine = document.createElement('div')
+  ammoLine.id = 'ammo'
+  app.appendChild(ammoLine)
+  const crosshair = document.createElement('div')
+  crosshair.id = 'crosshair'
+  crosshair.hidden = true
+  app.appendChild(crosshair)
+  let vitals: LocalVitals | null = null
+  const showVitals = (): void => {
+    const h = healthText(vitals)
+    if (healthLine.textContent !== h) healthLine.textContent = h
+    const a = ammoText(vitals)
+    if (ammoLine.textContent !== a) ammoLine.textContent = a
+    const show = crosshairVisible(rig.mode, vitals ? vitals.health : null)
+    if (crosshair.hidden === show) crosshair.hidden = !show
+  }
   let local: LocalPlayerState | null = null
   const showMode = (): void => {
     const text = modeText(local)
@@ -91,6 +113,7 @@ function start(view: GameScene): void {
   let lastSentYaw: number | null = null
   setInterval(() => {
     const locked = document.pointerLockElement === canvas
+    showVitals()
     hint.textContent = rig.mode !== 'overhead' && !locked ? 'Click to look around (Esc releases the mouse)' : ''
     if (!room) return
     const keys = input.direction()
@@ -128,6 +151,10 @@ function start(view: GameScene): void {
       if (isLocal) {
         local = { team: pose?.team ?? null, mode: pose?.mode ?? 'ground', x, y: pose?.y ?? 0, z }
         showMode()
+        vitals = pose?.team
+          ? { team: pose.team, health: pose.health ?? 1, ammo: pose.ammo ?? 0, reloading: pose.reloading ?? false }
+          : null
+        showVitals()
       }
       if (isLocal && pose && pose.team !== localTeam) {
         localTeam = pose.team
@@ -150,7 +177,9 @@ function start(view: GameScene): void {
         room = null
         localTeam = null
         local = null
+        vitals = null
         showMode()
+        showVitals()
         rig.reset()
         testHook.setDisconnected()
         setStatus('disconnected from server')
