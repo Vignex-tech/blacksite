@@ -18,12 +18,24 @@ export function createPerfMeter(engine: Engine, scene: Scene, parent: HTMLElemen
   el.hidden = true
   parent.appendChild(el)
 
+  // `engine._drawCalls.current` keeps adding up across frames in this Babylon
+  // version, so the draw calls of one frame are the change over one render.
+  let frameStart = 0
+  let frameDrawCalls = 0
+  const onBefore = scene.onBeforeRenderObservable.add(() => {
+    frameStart = engine._drawCalls.current
+  })
+  const onAfter = scene.onAfterRenderObservable.add(() => {
+    const d = engine._drawCalls.current - frameStart
+    frameDrawCalls = d >= 0 ? d : engine._drawCalls.current
+  })
+
   const sample = (): BlacksitePerfSnapshot => {
     let indices = 0
     for (const m of scene.getActiveMeshes().data) indices += m ? m.getTotalIndices() : 0
     return {
       fps: Math.round(engine.getFps()),
-      drawCalls: engine._drawCalls.current,
+      drawCalls: frameDrawCalls,
       activeTriangles: Math.round(indices / 3),
     }
   }
@@ -45,6 +57,8 @@ export function createPerfMeter(engine: Engine, scene: Scene, parent: HTMLElemen
   return {
     read: () => ({ ...last }),
     dispose: () => {
+      scene.onBeforeRenderObservable.remove(onBefore)
+      scene.onAfterRenderObservable.remove(onAfter)
       target.clearInterval(timer)
       target.removeEventListener('keydown', onKey)
       el.remove()

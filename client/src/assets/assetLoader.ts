@@ -38,11 +38,14 @@ export function createFailingLoader(): AssetLoader {
 
 /**
  * Model ids to file paths, relative to the page (through `BASE_URL`, so it
- * works behind the https tunnel). Empty until the art lands: #82 adds the
- * character models here. An id that is not listed loads as `null` without any
+ * works behind the https tunnel). The character models (#82). An id that is not listed loads as `null` without any
  * request (so no 404 reaches the console).
  */
-export const MODEL_URLS: Readonly<Record<string, string>> = {}
+export const MODEL_URLS: Readonly<Record<string, string>> = {
+  'character-ghost': assetUrl('characters/mesh_ghost.glb'),
+  'character-warden': assetUrl('characters/mesh_warden.glb'),
+  'weapon-rifle': assetUrl('characters/mesh_rifle.glb'),
+}
 
 /** URL for a file under `assets/`, relative to the app base. */
 export function assetUrl(path: string): string {

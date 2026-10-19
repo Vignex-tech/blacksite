@@ -308,6 +308,7 @@ function start(view: GameScene): void {
         onShot: (e) => {
           testHook.recordEvent('shot')
           feedback.shot(e, joined.sessionId)
+          view.playerShot(e.shooter)
         },
         onHit: (e) => {
           testHook.recordEvent(e.killed ? 'kill' : 'hit')

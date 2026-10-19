@@ -42,6 +42,10 @@ export interface GameScene {
   upsertPlayer(id: string, x: number, z: number, isLocal?: boolean, pose?: PlayerPose): void
   /** Remove the player's shape. Does nothing if the id is unknown. */
   removePlayer(id: string): void
+  /** A `shot` event arrived for this shooter: play the fire animation (visual only). */
+  playerShot(id: string): void
+  /** What a player's model is playing (clip or procedural pose), if a model is attached. */
+  playerAnimation(id: string): string | undefined
   dispose(): void
 }
 
@@ -119,6 +123,8 @@ export function createGameScene(canvas: HTMLCanvasElement, options: GameSceneOpt
     camera,
     upsertPlayer,
     removePlayer,
+    playerShot: players.shot,
+    playerAnimation: players.animation,
     dispose: () => {
       window.removeEventListener('resize', onResize)
       camera.dispose()
