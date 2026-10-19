@@ -5,7 +5,9 @@ Licence URL: https://docs.ambientcg.com/license/ (links to https://creativecommo
 Date checked: 2026-10-20
 Text read on the official page: "All ambientCG assets are provided under the Creative Commons CC0 1.0 Universal License." Permissions: "You can copy, modify, distribute and perform the assets, even for commercial purposes, all without asking permission." Credit is not required.
 Suggested credit text (optional): "Created using <asset name> from ambientCG.com, licensed under the Creative Commons CC0 1.0 Universal License."
-Assets planned: see Manifests/assets.json (Concrete034, Concrete037, PaintedPlaster012, Concrete033, PaintedMetal005, Metal038, Rust004, Metal027, DiamondPlate008A, Asphalt033).
+Assets used (#84, licence page and the asset pages re-read 2026-10-20: "All assets are released under the Creative Commons CC0 license"): Concrete034, Concrete037, PaintedPlaster012, Concrete033, PaintedMetal004, Metal038, Rust004, Metal027, DiamondPlate008A, Asphalt033. Pages: https://ambientcg.com/a/<assetId>.
+Change from #78: PaintedMetal005 was replaced by PaintedMetal004. The zip fetched for id PaintedMetal005 held files byte-identical to PaintedMetal004's (bright red scratched paint), while the PaintedMetal005 page and preview are lime green with black scratches. Neither is used as downloaded: the build repaints the paint muted green (Art/scripts/build_textures.mjs).
+Every set was viewed before use (#84). Regraded (colour, brightness, noise) for the cold dark palette; none is used as downloaded.
 
 --- Copy of the licence text shipped inside the download (verbatim) ---
 (The page links to the full CC0 text at https://creativecommons.org/publicdomain/zero/1.0/legalcode ; the page itself does not reproduce it.)
