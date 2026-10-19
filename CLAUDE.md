@@ -12,7 +12,7 @@ No agent's work, and no change of any kind, counts as done until the GitHub Acti
 
 ## The game
 Two teams with completely different gameplay.
-- **Ghosts** (infiltrators): third-person over-the-shoulder camera, parkour, ledge hanging, ceiling hanging, hacking, silent takedowns, hostage grabs. Fast and mobile, but fragile against gunfire.
+- **Ghosts** (infiltrators): third-person over-the-shoulder camera, parkour, ledge hanging, ceiling hanging, crouching, hacking, silent takedowns, hostage grabs. **Ghosts carry no gun** (owner, 2026-10-20): they kill a Warden only by sneaking up behind, grabbing, and pressing interact again to finish. Fast and mobile, but fragile against gunfire.
 - **Wardens** (defenders): first-person, weapon, flashlight, sound-based tracking, defensive gadgets. Tougher, but they cannot climb.
 
 Ghosts must hack one of two data terminals and complete the extraction before the round timer ends. Wardens must stop them or eliminate them.
@@ -47,6 +47,12 @@ Signature mechanics, in build order after the graybox: **Shadow Drop** (ceiling 
 
 ## Roadmap
 Each phase ends with a gate; do not start a later phase's work before the current gate passes.
+
+**Owner override (2026-10-20):** the graybox milestones M2 to M7 are done, and the two-device test (M8) moves to after the two pieces below. The order is now:
+1. **Art pass:** real low-poly models and textures in place of blocks (Phase 4 work, pulled forward). Assets start from free CC0 packs (generic, not from any game) and are restyled to our own dark-lit look. Each one is recorded in `Manifests/assets.json` with its source and license, and the first load stays under the 30 MB budget.
+2. **Gameplay change:** remove the Ghost's gun; add Ghost crouch; add the sneak grab from behind and a second interact press to kill (Phase 3 work, pulled forward). A grabbed Warden can break free by struggling, and a teammate shooting the Ghost frees them (rule 6).
+3. Then the M8 two-device test, then Phase 2 as listed below.
+
 1. **Graybox (current):** two players on different devices join a room over the tunnel link, play Ghost and Warden with basic movement, climbing, weapon damage and one hackable terminal, and finish a timed round.
 2. **Core asymmetry:** Shadow Drop, flashlight, sound cues, stealth visibility, one gadget per side.
 3. **Hostage:** the grab, restraint, escape, rescue and takedown, tested under simulated latency.
