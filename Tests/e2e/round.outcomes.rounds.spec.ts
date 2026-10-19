@@ -296,9 +296,15 @@ test('the Warden kills the only Ghost: warden wins (ghosts_eliminated), then bot
 test('the only Ghost leaving in live aborts to waiting with no winner; a new Ghost restarts the round', async () => {
   test.setTimeout(30_000)
   const g = await createRound(open)
+  // The countdown event is broadcast the moment the Warden joins, before the
+  // joiner's own listener can exist (#76), so the Ghost, already in the room,
+  // records countdown and live; the Warden records everything from the abort on.
+  const gEvents = collectRoundEvents(g)
   const w = await joinRound(g.roomId, open)
   const wEvents = collectRoundEvents(w)
   await waitForPhase(w, 'live', 5000)
+  await waitForPhase(g, 'live', 5000)
+  gEvents.stop()
   const wTerm = watchTerminal(w)
   await sleep(300)
   await leaveQuietly(g)
@@ -314,7 +320,8 @@ test('the only Ghost leaving in live aborts to waiting with no winner; a new Gho
   await waitForPhase(g2, 'live', 4000)
   const ghost2 = own(g2)
   wEvents.stop()
-  const phases = wEvents.events.map((e) => [e.phase, e.winner, e.winReason])
+  const fromAbort = wEvents.events.findIndex((e) => e.phase === 'waiting')
+  const phases = [...gEvents.events, ...(fromAbort < 0 ? [] : wEvents.events.slice(fromAbort))].map((e) => [e.phase, e.winner, e.winReason])
   const statuses = [...wTerm.statuses]
   await Promise.all(open.splice(0).map((r) => leaveQuietly(r)))
 
