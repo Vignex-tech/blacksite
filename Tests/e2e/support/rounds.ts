@@ -111,3 +111,32 @@ export async function joinRound(roomId: string, open: GameRoom[], options: objec
 export function roundPlain(r: RoundState): RoundState {
   return { phase: r.phase, roundNumber: r.roundNumber, secondsLeft: r.secondsLeft, winner: r.winner, winReason: r.winReason }
 }
+
+// ---------------------------------------------------------------------------
+// Browser tabs on the `fast` server (#73). The client calls joinOrCreate, which
+// would drop a tab into any room an SDK spec running in parallel has made. So
+// the first tab's matchmaking request is turned into `create` (a room of its
+// own) and every later tab's into `joinById` for that room. Only the request
+// URL changes, in the test's browser context; no client code is touched.
+// ---------------------------------------------------------------------------
+
+/** Returns the `beforeGoto` hook for `openTab`: the first tab creates a fresh room, the others join it. */
+export function ownRoom(): { beforeGoto: (page: import('@playwright/test').Page) => Promise<void>; roomId: () => string } {
+  let id = ''
+  return {
+    roomId: () => id,
+    beforeGoto: async (page) => {
+      await page.route('**/matchmake/joinOrCreate/**', async (route) => {
+        const origin = new URL(route.request().url()).origin
+        if (id === '') {
+          const res = await route.fetch({ url: `${origin}/matchmake/create/${ROOM_NAME}` })
+          const body = (await res.json()) as { roomId?: string }
+          id = body.roomId ?? ''
+          await route.fulfill({ response: res, json: body })
+        } else {
+          await route.continue({ url: `${origin}/matchmake/joinById/${id}` })
+        }
+      })
+    },
+  }
+}
