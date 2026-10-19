@@ -10,6 +10,8 @@ import {
   MOVEMENT_MODES,
   RELOAD_MESSAGE,
   ROOM_NAME,
+  ROUND_PHASES,
+  ROUND_WIN_REASONS,
   SHOT_EVENT,
   TEAMS,
   TERMINAL_STATUSES,
@@ -25,6 +27,7 @@ import {
   type TerminalStatus,
 } from '../../shared/protocol.js'
 import { defaultVitals } from './vitals.ts'
+import type { RoundView } from './roundView.ts'
 
 /** Port the Colyseus server listens on by default (server/src/index.ts). */
 const SERVER_PORT = 2567
@@ -201,4 +204,30 @@ interface PlayersCallbacks {
 interface TerminalCallbacks {
   onAdd(property: 'terminals', handler: (terminal: TerminalState, id: string) => void): () => void
   onChange(instance: TerminalState, handler: () => void): () => void
+}
+
+/**
+ * Reads `state.round` on every state patch (and once now) and passes a
+ * checked copy to the handler. Bad or missing fields are dropped; the handler
+ * is not called until a valid round exists.
+ */
+export function watchRound(room: Room, onRound: (round: RoundView) => void): void {
+  const read = (): void => {
+    const r = (room.state as unknown as { round?: unknown } | undefined)?.round
+    if (!isObj(r)) return
+    if (!(ROUND_PHASES as readonly string[]).includes(r.phase as string)) return
+    const winner = r.winner === 'ghost' || r.winner === 'warden' ? r.winner : ''
+    const winReason = (ROUND_WIN_REASONS as readonly string[]).includes(r.winReason as string)
+      ? (r.winReason as RoundView['winReason'])
+      : ''
+    onRound({
+      phase: r.phase as RoundView['phase'],
+      roundNumber: finiteOr(r.roundNumber, 0),
+      secondsLeft: finiteOr(r.secondsLeft, 0),
+      winner,
+      winReason,
+    })
+  }
+  room.onStateChange(read)
+  read()
 }

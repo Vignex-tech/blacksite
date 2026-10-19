@@ -10,6 +10,7 @@ import {
   sendInteract,
   sendMove,
   sendReload,
+  watchRound,
   watchTerminals,
   type PlayerView,
 } from './net.ts'
@@ -21,6 +22,7 @@ import { wrapAngle } from './cameras.ts'
 import { FirePacer } from './firePacer.ts'
 import { createCombatFeedback } from './combat.ts'
 import { HACKED_TEXT, hackAlertText, hackBarText, hackPrompt, progressPercent, type TerminalSnapshot } from './hackHint.ts'
+import { bannerIsBig, bannerText, isFrozen, resultClass, resultText, timerText, type RoundView } from './roundView.ts'
 import { ammoText, crosshairVisible, healthText, isEliminated, type LocalVitals } from './vitals.ts'
 
 /** How often a held movement key sends a "move" message. */
@@ -99,6 +101,33 @@ function start(view: GameScene): void {
   app.appendChild(crosshair)
   let vitals: LocalVitals | null = null
 
+  // Round overlays (#72): text from state.round only; the client counts nothing.
+  const roundTimer = document.createElement('div')
+  roundTimer.id = 'round-timer'
+  app.appendChild(roundTimer)
+  const roundBanner = document.createElement('div')
+  roundBanner.id = 'round-banner'
+  app.appendChild(roundBanner)
+  const roundResult = document.createElement('div')
+  roundResult.id = 'round-result'
+  roundResult.hidden = true
+  app.appendChild(roundResult)
+  let round: RoundView | null = null
+  const frozen = (): boolean => isFrozen(round)
+  const showRound = (): void => {
+    const t = timerText(round)
+    if (roundTimer.textContent !== t) roundTimer.textContent = t
+    const b = bannerText(round)
+    if (roundBanner.textContent !== b) roundBanner.textContent = b
+    const big = bannerIsBig(round) ? 'big' : ''
+    if (roundBanner.className !== big) roundBanner.className = big
+    const r = resultText(round, local?.team ?? null)
+    if (roundResult.textContent !== r) roundResult.textContent = r
+    const cls = r === '' ? '' : resultClass(round)
+    if (roundResult.className !== cls) roundResult.className = cls
+    if (roundResult.hidden !== (r === '')) roundResult.hidden = r === ''
+  }
+
   // Hack feedback (#60): prompt, Ghost-only progress bar and the Warden alert.
   // Everything shown comes from received state; nothing is predicted.
   const hackPromptLine = document.createElement('div')
@@ -114,7 +143,7 @@ function start(view: GameScene): void {
   let hackProgress: number | null = null
   const showHack = (): void => {
     const team = local?.team ?? null
-    const p = hackPrompt(local ? { ...local, health: vitals?.health } : null, terminals)
+    const p = frozen() ? '' : hackPrompt(local ? { ...local, health: vitals?.health } : null, terminals)
     if (hackPromptLine.textContent !== p) hackPromptLine.textContent = p
     const b = hackBarText(team, hackProgress, terminals)
     if (hackBar.textContent !== b) hackBar.textContent = b
@@ -129,26 +158,27 @@ function start(view: GameScene): void {
     if (healthLine.textContent !== h) healthLine.textContent = h
     const a = ammoText(vitals)
     if (ammoLine.textContent !== a) ammoLine.textContent = a
-    const show = crosshairVisible(rig.mode, vitals ? vitals.health : null)
+    const show = !frozen() && crosshairVisible(rig.mode, vitals ? vitals.health : null)
     if (crosshair.hidden === show) crosshair.hidden = !show
   }
   let local: LocalPlayerState | null = null
   const showMode = (): void => {
     const text = modeText(local)
     if (modeLine.textContent !== text) modeLine.textContent = text
-    const p = climbPrompt(local)
+    const p = frozen() ? '' : climbPrompt(local)
     if (prompt.textContent !== p) prompt.textContent = p
   }
 
   // One message per press of Space, E or C; the server decides the outcome.
   new ActionInput((action) => {
-    if (room) sendAction(room, action)
+    if (room && !frozen()) sendAction(room, action)
   })
 
   // Hold F to hack: true on keydown, false on keyup. Only a living Ghost in a
   // team camera sends anything; the server decides range and timing.
   const interactActive = (): boolean =>
     room !== null &&
+    !frozen() &&
     rig.mode !== 'overhead' &&
     vitals !== null &&
     vitals.team !== null &&
@@ -163,13 +193,14 @@ function start(view: GameScene): void {
   // server decides ammo, cooldown and hits. Feedback comes from server events.
   const combatActive = (): boolean =>
     room !== null &&
+    !frozen() &&
     rig.mode !== 'overhead' &&
     document.pointerLockElement === canvas &&
     vitals !== null &&
     vitals.team !== null &&
     !isEliminated(vitals.health)
   const fireInput = new FireInput(combatActive, () => {
-    if (room) sendReload(room)
+    if (room && !frozen()) sendReload(room)
   })
   const pacer = new FirePacer()
   const feedback = createCombatFeedback(view.scene, app)
@@ -184,9 +215,11 @@ function start(view: GameScene): void {
     const locked = document.pointerLockElement === canvas
     showVitals()
     showHack()
+    showRound()
+    showMode()
     interactInput.sync()
     hint.textContent = rig.mode !== 'overhead' && !locked ? 'Click to look around (Esc releases the mouse)' : ''
-    if (!room) return
+    if (!room || frozen()) return // frozen by the round: the server would ignore it
     if (fireInput.firing() && vitals && vitals.team && vitals.ammo > 0 && !vitals.reloading) {
       if (pacer.due(performance.now(), vitals.team)) {
         sendFire(room, rig.yaw, -rig.pitch) // camera pitch is positive down; the wire is positive up
@@ -232,6 +265,7 @@ function start(view: GameScene): void {
           : null
         showVitals()
         showHack()
+        showRound()
       }
       if (isLocal && pose && pose.team !== localTeam) {
         localTeam = pose.team
@@ -254,6 +288,14 @@ function start(view: GameScene): void {
         terminals.set(id, { status, alert })
         testHook.setTerminal(id, status, alert)
         view.terminals.update(id, status)
+        showHack()
+      })
+      watchRound(joined, (r) => {
+        round = r
+        testHook.setRound(r)
+        showRound()
+        showMode()
+        showVitals()
         showHack()
       })
       onHackProgress(joined, (progress) => {
@@ -283,11 +325,14 @@ function start(view: GameScene): void {
         vitals = null
         terminals.clear()
         hackProgress = null
+        round = null
+        testHook.setRound(null)
         view.terminals.reset()
         interactInput.sync()
         showMode()
         showVitals()
         showHack()
+        showRound()
         rig.reset()
         testHook.setDisconnected()
         setStatus('disconnected from server')

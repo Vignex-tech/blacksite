@@ -1,6 +1,7 @@
 import type { BlacksiteCameraSnapshot, BlacksiteSnapshot, BlacksiteTestHook } from '../../shared/testhook.js'
 import { ACTIVE_TERMINAL_ID } from '../../shared/map.js'
 import type { MovementMode, Team, TerminalStatus } from '../../shared/protocol.js'
+import type { RoundView } from './roundView.ts'
 import type { PlayerPose, PlayerView } from './net.ts'
 import { defaultVitals } from './vitals.ts'
 
@@ -35,6 +36,8 @@ export interface TestHookRecorder {
   setTerminal(id: string, status: TerminalStatus, alert: boolean): void
   /** Records the Ghost-only hack progress as received (M6, #60). */
   setHackProgress(progress: number): void
+  /** Records the round as received from room state (M7, #72); null clears it. */
+  setRound(round: RoundView | null): void
 }
 
 interface TraversalCounts {
@@ -71,6 +74,7 @@ export function installTestHook(target: Window = window): TestHookRecorder {
   const events = { shots: 0, hits: 0, kills: 0, damaged: 0 }
   const terminals = new Map<string, { status: TerminalStatus; alert: boolean }>()
   let hackProgress: number | null = null
+  let round: RoundView | null = null
   let cameraSource: (() => BlacksiteCameraSnapshot) | null = null
 
   const hook: BlacksiteTestHook = Object.freeze({
@@ -108,6 +112,7 @@ export function installTestHook(target: Window = window): TestHookRecorder {
           .map(([id, t]) => ({ id, status: t.status, alert: t.alert, active: id === ACTIVE_TERMINAL_ID })),
         hack: hackProgress === null ? null : { progress: hackProgress },
       }
+      if (round) snap.round = { ...round }
       if (cameraSource) {
         const { mode, yaw } = cameraSource()
         snap.camera = { mode, yaw }
@@ -156,6 +161,7 @@ export function installTestHook(target: Window = window): TestHookRecorder {
       players.clear()
       terminals.clear()
       hackProgress = null
+      round = null
     },
     setMap(id, count, counts) {
       mapId = id
@@ -177,6 +183,9 @@ export function installTestHook(target: Window = window): TestHookRecorder {
     },
     setHackProgress(progress) {
       hackProgress = progress
+    },
+    setRound(r) {
+      round = r ? { ...r } : null
     },
     setCamera(source) {
       cameraSource = source
