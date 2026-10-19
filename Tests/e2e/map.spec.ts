@@ -67,7 +67,15 @@ const frames = (page: Page, n: number) =>
     n,
   )
 
-const EXPECTED_MAP = { id: GRAYBOX_MAP.id, renderedSolids: GRAYBOX_MAP.solids.length }
+// Since #33 the map report also counts the upper level's floors, ramps and
+// anchors (#34): every count equals the length of its shared list.
+const EXPECTED_MAP = {
+  id: GRAYBOX_MAP.id,
+  renderedSolids: GRAYBOX_MAP.solids.length,
+  renderedFloors: GRAYBOX_MAP.floors.length,
+  renderedRamps: GRAYBOX_MAP.ramps.length,
+  renderedAnchors: GRAYBOX_MAP.anchors.length,
+}
 
 test('each tab renders every solid of the shared map; screenshot for review', async ({ browser }, testInfo) => {
   test.setTimeout(60_000)
@@ -77,15 +85,14 @@ test('each tab renders every solid of the shared map; screenshot for review', as
     await joined(a.page, 2)
     await joined(b.page, 2)
 
-    // Version-1 fields matched, not compared exactly, so fields added in
-    // version 1 don't fail this: the map report may gain counts for floors,
-    // ramps or anchors (#33) and still pass, as long as renderedSolids is 16.
+    // Matched, not compared exactly, so fields added later in version 1 don't
+    // fail this; every count known today is pinned.
     for (const { page } of [a, b]) {
       const s = await snap(page)
       expect(s.version).toBe(1)
       expect(s.map).toMatchObject(EXPECTED_MAP)
     }
-    expect(EXPECTED_MAP).toEqual({ id: 'graybox-1', renderedSolids: 16 })
+    expect(EXPECTED_MAP).toEqual({ id: 'graybox-1', renderedSolids: 16, renderedFloors: 4, renderedRamps: 1, renderedAnchors: 6 })
 
     // The joined tabs are in their team cameras (#24): tab A, the first
     // joiner, is the ghost in third person and tab B the warden in first
