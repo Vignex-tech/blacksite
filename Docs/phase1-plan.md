@@ -4,7 +4,7 @@ Written 2026-10-18 by the director. Phase 1 ends at the graybox gate in `CLAUDE.
 
 > Two players on different devices join a room over the tunnel link, play Ghost and Warden with basic movement, climbing, weapon damage and one hackable terminal, and finish a timed round.
 
-Milestones #1 (two tabs join one room and see each other move), #9 (graybox map, server collision, test hook), #17 (teams, per-team speed and cameras) and #26 (vertical movement and climbing) are done. The milestones below run in order. Each one starts with its `shared/` contract and its server-authority work, because the server decides everything (rule 1). The client renders and sends inputs; qa-build verifies each piece before the next one starts. Only the next milestone has GitHub issues; later ones are filed when the one before passes its gate.
+Milestones #1 (two tabs join one room and see each other move), #9 (graybox map, server collision, test hook), #17 (teams, per-team speed and cameras) and #26 (vertical movement and climbing) are done; #38 (weapons) is filed. The milestones below run in order. Each one starts with its `shared/` contract and its server-authority work, because the server decides everything (rule 1). The client renders and sends inputs; qa-build verifies each piece before the next one starts. Only the next milestone has GitHub issues; later ones are filed when the one before passes its gate.
 
 ## Milestones
 
@@ -50,12 +50,32 @@ Milestones #1 (two tabs join one room and see each other move), #9 (graybox map,
 - **Gate:** a Ghost reaches the upper level only through anchors and can hang from a ledge and drop; a Warden reaches it only by stairs and is refused when trying to climb; a forged climb message far from an anchor is rejected.
 - **Not in M4:** animation, ceiling hanging and Shadow Drop (Phase 2), fall damage (M5), camera collision (backlog).
 
-### Milestone 5: weapons and damage
-- **Goal:** players can shoot and be hurt and eliminated, with every hit decided by the server.
-- **Order:** `shared/` first: a fire message (aim direction only), a reload message, `health` and `ammo` in player state, weapon stats for HUD display. Then server: hitscan raycast against the map's solids and player volumes, fire-rate cooldown, magazine and reload, damage, elimination (an eliminated player is out for the round). Warden rifle; Ghost suppressed sidearm with low damage, so the Ghost is fragile but not helpless (rule 4). Then client: crosshair, shot and hit feedback, health and ammo in the HUD.
-- **Agents:** gameplay-engineer, server-engineer, qa-build.
-- **Hidden information (decided on #9):** in this milestone the server also stops sending a Warden client the positions of Ghosts it can't see, reusing the hitscan raycast (line of sight, or within a short range). The test hook then shows only what the filtered state contains.
-- **Gate:** shots through walls never hit; fire rate and ammo are enforced on the server (a forged rapid-fire client is capped); a Ghost dies in fewer hits than a Warden; an eliminated player cannot move or shoot; a Warden client is not sent the position of a Ghost behind a wall.
+### Milestone 5: weapons and damage (tracking issue #38, issues #39 to #51)
+- **Goal:** players can shoot and be hurt and eliminated, with every hit decided by the server, and Warden clients stop being sent Ghosts they cannot see.
+- **Order:** `shared/` first: a fire message (aim yaw and pitch only), a reload message, `health`, `ammo` and `reloading` in player state, weapon stats for HUD display, and shot, hit and damage events (#39). Then server: hitscan raycast against solids, floors, ramps, the ground and player volumes at their y, fire-rate cooldown, magazine and damage (#41); reload and elimination lock-out (#43). Warden rifle; Ghost suppressed sidearm with low damage, so the Ghost is fragile but not helpless (rule 4). Then the visibility filter as its own issue (#46), reusing the raycast. Then client: crosshair, health and ammo HUD, eliminated look, players that appear and vanish (#48), then the fire and reload bindings with shot and hit feedback (#50). qa-build makes the tests ready before the server changes state (#40) and again before the filter (#45), and verifies every step.
+- **Hidden information (decided on #9):** the server stops sending a Warden client the Ghosts it can't see (line of sight from its eye to the Ghost's box, or within a short range). A hidden Ghost is absent from that client's state; the test hook then shows only the filtered state. Mechanism: Colyseus 0.18 `StateView`, to be confirmed by the server-engineer on #46.
+- **Run order (one agent at a time):**
+
+  | Order | # | Issue | Agent | Depends on |
+  |---|---|---|---|---|
+  | 1 | #39 | Shared contract: fire, reload, health, ammo, weapon stats, hit events | gameplay-engineer | none |
+  | 2 | #40 | QA: make existing tests ready for health, ammo and new messages | qa-build | #39 |
+  | 3 | #41 | Server: hitscan fire, cooldown, magazine and damage | server-engineer | #39, #40 |
+  | 4 | #42 | QA: verify fire, walls, cooldown, ammo and damage | qa-build | #41 |
+  | 5 | #43 | Server: reload and elimination lock-out | server-engineer | #41, #42 |
+  | 6 | #44 | QA: verify reload, kills and eliminated players | qa-build | #43 |
+  | 7 | #45 | QA: make existing tests ready for the visibility filter | qa-build | #44 |
+  | 8 | #46 | Server: hide Ghosts from Wardens who cannot see them | server-engineer | #41, #45 |
+  | 9 | #47 | QA: verify the visibility filter in state and on the wire | qa-build | #46 |
+  | 10 | #48 | Client: crosshair, health and ammo HUD, eliminated state, players that appear and vanish | gameplay-engineer | #43, #46, #47 |
+  | 11 | #49 | QA: verify HUD, crosshair, hook fields and vanishing players in both tabs | qa-build | #48 |
+  | 12 | #50 | Client: fire and reload bindings, shot and hit feedback | gameplay-engineer | #48, #49 |
+  | 13 | #51 | QA: M5 gate in real tabs | qa-build | #50 |
+
+- **Proposed defaults (the owner can change them; each is one constant or one function):** health Ghost 100, Warden 150; Warden rifle 25 damage, 150 ms, magazine 30, reload 2000 ms, range 40; Ghost suppressed sidearm 15 damage, 300 ms, magazine 12, reload 1500 ms, range 25; unlimited reserve ammo and no auto-reload; no headshots; friendly fire off; fire from the eye (1.6) with no spread or recoil and no lag compensation; eliminated players stay as frozen grey bodies with no respawn and no free camera until M7; no fall damage; Warden filter = line of sight from its own eye to any sample point of the Ghost's box, or within 2.0 units, with no view cone, per client; Ghosts see everyone; Warden shots are heard by all, Ghost shots only by Ghosts; fire and reload share a rate bucket (10/s, burst 3); left mouse fires only while the pointer is locked, R reloads. The full list is on #38.
+- **Agents:** gameplay-engineer (#39, #48, #50), server-engineer (#41, #43, #46), qa-build (#40, #42, #44, #45, #47, #49, #51).
+- **Gate:** shots through walls never hit; fire rate and ammo are enforced on the server (a forged rapid-fire client is capped); a Ghost dies in fewer hits than a Warden; an eliminated player cannot move, act or shoot; a Warden client is not sent the position of a Ghost behind a wall.
+- **Not in M5:** respawn and rounds (M7), terminals (M6), lag compensation, headshots, recoil, spectator camera, gadgets, flashlight and sound cues (Phase 2).
 
 ### Milestone 6: one hackable terminal
 - **Goal:** a Ghost can hack one data terminal by holding interact in range, and the Warden can interrupt it.

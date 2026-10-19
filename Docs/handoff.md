@@ -5,7 +5,7 @@ Last updated 2026-10-19 by the director after milestone 4, on the owner's Window
 ## State
 - Repo: `Vignex-tech/blacksite` (private), branch `main`. Milestones #1, #9 (M2), #17 (M3) and #26 (M4) are done; the M4 gate commit is `79c0c6c` (CI green), followed by `1a0d5e9` (agents on Sonnet) and this hand-off.
 - CI: `.github/workflows/ci.yml` (job `build-and-test`) builds the client and server, then runs Mocha (server), Vitest (`Tests/unit`) and Playwright (`Tests/e2e`). **Nothing counts as done until CI passes** (see `CLAUDE.md`).
-- Next: milestone 5 (weapons and damage, plus the hidden-information filter), **not filed yet**; see `Docs/phase1-plan.md`. One open issue: #37 (tsc errors in `server/test/MyRoomClimbing.test.ts`, server-engineer, low priority). Follow-ups from M3 and M4 are in `Docs/backlog.md`.
+- Next: milestone 5 (weapons and damage, plus the hidden-information filter), tracking issue #38, issues #39 to #51 in run order (see `Docs/phase1-plan.md`); start with #39. Owner decisions are proposed defaults on #38. One open issue: #37 (tsc errors in `server/test/MyRoomClimbing.test.ts`, server-engineer, low priority). Follow-ups from M3 and M4 are in `Docs/backlog.md`.
 
 ### Shared contract (`shared/`)
 - Plain ESM `.js` runtime files with `.d.ts` types, and `shared/package.json` (`"type": "module"`). The client imports `../../shared/<file>.js` and the server `../../../shared/<file>.js` (from `server/src/rooms/` or `server/src/rules/`).
