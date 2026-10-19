@@ -45,6 +45,12 @@ jobs:
         working-directory: server
         run: npm run build
 
+      # Mocha runs through tsx, which never type-checks the tests, so check
+      # server/test (and src) here (#37).
+      - name: Server - type-check (tsc --noEmit)
+        working-directory: server
+        run: npx tsc --noEmit
+
       - name: Server - test (Mocha)
         working-directory: server
         run: npm test
