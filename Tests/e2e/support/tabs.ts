@@ -184,9 +184,9 @@ export interface Sample {
  */
 export async function startSampler(page: Page, everyMs = 10): Promise<() => Promise<Sample[]>> {
   await page.evaluate((ms) => {
-    const w = window as unknown as { __qaSamples: unknown[]; __qaTimer: number }
+    const w = window as unknown as { __qaSamples: unknown[]; __qaTimer: number; __qaSample: () => void }
     w.__qaSamples = []
-    w.__qaTimer = window.setInterval(() => {
+    w.__qaSample = () => {
       const s = window.__blacksite.snapshot()
       w.__qaSamples.push({
         t: performance.now(),
@@ -195,12 +195,17 @@ export async function startSampler(page: Page, everyMs = 10): Promise<() => Prom
           return { id: p.id, x: p.x, z: p.z, yaw: p.yaw, ...('y' in extra ? { y: extra.y } : {}), ...('mode' in extra ? { mode: extra.mode } : {}) }
         }),
       })
-    }, ms)
+    }
+    w.__qaTimer = window.setInterval(w.__qaSample, ms)
   }, everyMs)
+  // Stopping takes one last sample: in a loaded headless page the interval
+  // can go a second or more without firing (#36 saw a record end one state
+  // short of what the hook had already shown), so the final state is always in.
   return () =>
     page.evaluate(() => {
-      const w = window as unknown as { __qaSamples: unknown[]; __qaTimer: number }
+      const w = window as unknown as { __qaSamples: unknown[]; __qaTimer: number; __qaSample: () => void }
       window.clearInterval(w.__qaTimer)
+      w.__qaSample()
       return w.__qaSamples as Sample[]
     })
 }

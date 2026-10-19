@@ -3,6 +3,8 @@
 // client's input-to-message mapping end to end (#25): which dx, dz and yaw it
 // sends and how often. The mapping lives inside client/src/main.ts's tick and
 // can't be imported without a browser, so it is checked on the wire instead.
+// Since #36 it also reads the "action" messages (Space, E, C), to count one
+// action per key press.
 //
 // Wire format (Colyseus 0.18 SDK): one byte ROOM_DATA (13), the message type
 // as a msgpack string, then the payload packed by msgpackr with records:
@@ -13,7 +15,7 @@
 // change of wire format fails loudly instead of being misread.
 
 import type { Page } from '@playwright/test'
-import { MOVE_MESSAGE } from '../../../shared/protocol.js'
+import { ACTION_MESSAGE, MOVE_MESSAGE } from '../../../shared/protocol.js'
 
 /** Colyseus protocol code for a room message sent with room.send(type, payload). */
 export const ROOM_DATA = 13
@@ -175,14 +177,28 @@ export interface SentMove {
   keys: string[]
 }
 
+/** One action message as sent by a tab (#36), with the Node time it was seen. */
+export interface SentAction {
+  t: number
+  action: unknown
+  /** Every key of the payload, to catch extra fields (an action has only `action`). */
+  keys: string[]
+}
+
 /**
- * Records every "move" message the page sends, from now on. Call before
- * page.goto so the room's socket is captured. Frames that aren't room
- * messages are ignored; a room message that can't be decoded is kept in
- * `errors`, so tests can fail on it.
+ * Records every "move" and "action" message the page sends, from now on.
+ * Call before page.goto so the room's socket is captured. Frames that aren't
+ * room messages, or are other room messages, are ignored; a room message
+ * that can't be decoded is kept in `errors`, so tests can fail on it.
  */
-export function captureMoves(page: Page): { moves: SentMove[]; errors: string[]; since(t: number): SentMove[] } {
+export function captureMoves(page: Page): {
+  moves: SentMove[]
+  actions: SentAction[]
+  errors: string[]
+  since(t: number): SentMove[]
+} {
   const moves: SentMove[] = []
+  const actions: SentAction[] = []
   const errors: string[] = []
   page.on('websocket', (ws) => {
     ws.on('framesent', (f) => {
@@ -190,14 +206,15 @@ export function captureMoves(page: Page): { moves: SentMove[]; errors: string[];
       const bytes = typeof f.payload === 'string' ? new TextEncoder().encode(f.payload) : new Uint8Array(f.payload)
       try {
         const m = decodeRoomMessage(bytes)
-        if (!m || m.type !== MOVE_MESSAGE) return
+        if (!m || (m.type !== MOVE_MESSAGE && m.type !== ACTION_MESSAGE)) return
         const p = m.payload as Record<string, unknown>
-        if (!p || typeof p !== 'object') throw new Error(`move payload is ${JSON.stringify(p)}`)
-        moves.push({ t, dx: p.dx, dz: p.dz, yaw: p.yaw, keys: Object.keys(p).sort() })
+        if (!p || typeof p !== 'object' || Array.isArray(p)) throw new Error(`${String(m.type)} payload is ${JSON.stringify(p)}`)
+        if (m.type === ACTION_MESSAGE) actions.push({ t, action: p.action, keys: Object.keys(p).sort() })
+        else moves.push({ t, dx: p.dx, dz: p.dz, yaw: p.yaw, keys: Object.keys(p).sort() })
       } catch (err) {
         errors.push(`${(err as Error).message} in frame ${Buffer.from(bytes).toString('hex')}`)
       }
     })
   })
-  return { moves, errors, since: (t) => moves.filter((m) => m.t >= t) }
+  return { moves, actions, errors, since: (t) => moves.filter((m) => m.t >= t) }
 }

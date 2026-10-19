@@ -71,8 +71,9 @@ jobs:
       # from the overhead camera (graybox-map.png) and the ghost's third-person
       # and the warden's first-person views (#25), and from e2e/upper-level.spec.ts
       # the warden's view of a ghost hanging from a ledge and of a warden on the
-      # upper level above the stairs (#34). Uploaded on every run; no test
-      # compares their pixels.
+      # upper level above the stairs (#34), and from e2e/m4-gate.spec.ts the
+      # ghost's third-person view while hanging from ledge-west-wall (#36).
+      # Uploaded on every run; no test compares their pixels.
       - name: Upload map screenshot
         if: ${{ !cancelled() }}
         uses: actions/upload-artifact@v4
