@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url'
 import { expect, test, type Browser, type Page } from '@playwright/test'
 import { GRAYBOX_MAP } from '../../shared/map.js'
 import type { BlacksiteSnapshot } from '../../shared/testhook.js'
+import { guaranteedPlayers } from './support/tabs.js'
 
 // #16: each tab renders the graybox map from shared/map.js (#14). The check is
 // the test hook's map report, not pixels. Since #25 there are three
@@ -42,15 +43,20 @@ async function open(browser: Browser): Promise<{ page: Page; errors: string[] }>
   return { page, errors }
 }
 
-/** Waits until the tab is connected and knows `n` players. */
-async function joined(page: Page, n: number): Promise<void> {
+/**
+ * Waits until the tab is connected, knows its team and holds the players it
+ * must hold in a 1v1 room: the Ghost tab both, the Warden tab itself (it may
+ * not be sent the Ghost since the M5 filter, #45).
+ */
+async function joined(page: Page): Promise<void> {
   await expect
     .poll(
       async () => {
         const s = await snap(page)
-        return s.connected && s.sessionId !== null && s.players.length === n
+        if (!(s.connected && s.sessionId !== null && s.localTeam !== null)) return false
+        return s.players.length >= guaranteedPlayers(s.localTeam, { ghosts: 1, wardens: 1 })
       },
-      { message: `tab is connected and sees ${n} players`, timeout: WAIT_MS },
+      { message: 'tab is connected and holds the players it must see', timeout: WAIT_MS },
     )
     .toBe(true)
 }
@@ -82,8 +88,8 @@ test('each tab renders every solid of the shared map; screenshot for review', as
   const a = await open(browser)
   const b = await open(browser)
   try {
-    await joined(a.page, 2)
-    await joined(b.page, 2)
+    await joined(a.page)
+    await joined(b.page)
 
     // Matched, not compared exactly, so fields added later in version 1 don't
     // fail this; every count known today is pinned.

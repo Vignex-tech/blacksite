@@ -14,10 +14,12 @@ import {
   openTab,
   pageNow,
   startSampler,
+  guaranteedPlayers,
   type Tab,
 } from './support/tabs.js'
 import { angleDiff } from './support/intent.js'
 import { expectTeamsAndYaws } from './support/hook.js'
+import { Observer } from './support/observer.js'
 
 // #15: in the browser, holding a key toward a wall stops the local player
 // flush with the wall, as seen in both tabs. State is read only through
@@ -33,6 +35,12 @@ import { expectTeamsAndYaws } from './support/hook.js'
 // the snapshot's yaw is 0 before pressing W. The stop position doesn't depend
 // on the team's speed. Since #22 (verified in #23) every snapshot must carry
 // team, yaw and localTeam, and both tabs agree on A's team.
+//
+// Since #45 these hold with the M5 visibility filter (#46): tab B (a Warden)
+// is not sent the Ghost unless it can see it, so "another client sees A flush
+// with the wall" is checked by an SDK Ghost observer (support/observer.ts, the
+// third joiner), which is sent every player. Tab B still runs the overlap watch
+// on whatever it holds.
 
 const VIEWPORT = { width: 800, height: 600 }
 /** Upper bound for short waits. A failure, never a delay. */
@@ -68,28 +76,34 @@ async function joined(page: Page): Promise<string> {
     .poll(
       async () => {
         const s = await snap(page)
-        return s.connected && s.sessionId !== null && s.players.length === 2
+        if (!(s.connected && s.sessionId !== null && s.localTeam !== null)) return false
+        // A Ghost tab holds both players, a Warden tab at least itself (it may not be sent the Ghost).
+        return s.players.length >= guaranteedPlayers(s.localTeam, { ghosts: 1, wardens: 1 })
       },
-      { message: 'tab is connected and sees 2 players', timeout: WAIT_MS },
+      { message: 'tab is connected and holds the players it must see', timeout: WAIT_MS },
     )
     .toBe(true)
   return (await snap(page)).sessionId!
 }
 
-test('holding W toward a wall stops the local player at the wall face, as seen in both tabs', async ({ browser }) => {
+test('holding W toward a wall stops the local player at the wall face, as seen by the other clients', async ({ browser }) => {
   test.setTimeout(90_000)
   const a = await openPlayer(browser)
   const b = await openPlayer(browser)
+  let observer: Observer | undefined
   try {
     const idA = await joined(a)
     await joined(b)
+    // The observer, an SDK Ghost (the third joiner), is the "other client" that sees A.
+    observer = await Observer.join()
+    await observer.waitForPlayers(3)
 
     const sa = await snap(a)
     const sb = await snap(b)
     expectTeamsAndYaws(sa)
     expectTeamsAndYaws(sb)
     const start = get(sa, idA)
-    expect(get(sb, idA).team, "both tabs agree on A's team").toBe(start.team)
+    expect(observer.at(idA)?.team, "the observer agrees on A's team").toBe(start.team)
     expect(sa.localTeam).toBe(start.team)
     expect(overlapping(start).map((s) => s.id), 'A spawned clear of solids').toEqual([])
     // W is +z. The first solid face north of A's spawn (every spawn area has
@@ -110,7 +124,7 @@ test('holding W toward a wall stops the local player at the wall face, as seen i
 
     // Precondition for "W is +z": A faces +z (yaw 0), in both tabs.
     expect(angleDiff(start.yaw, 0), `A faces +z (yaw ${start.yaw})`).toBeLessThan(EPS)
-    expect(angleDiff(get(sb, idA).yaw, 0), `tab B sees A facing +z`).toBeLessThan(EPS)
+    expect(angleDiff(observer.at(idA)!.yaw, 0), `the observer sees A facing +z`).toBeLessThan(EPS)
 
     await a.keyboard.down('KeyW')
     try {
@@ -137,20 +151,21 @@ test('holding W toward a wall stops the local player at the wall face, as seen i
       await a.keyboard.up('KeyW')
     }
 
-    // Tab B sees A at the same place, flush with the wall.
+    // The observer sees A at the same place, flush with the wall; tab B holds its own player
+    // (and is watched for overlaps) but is not required to be sent the Ghost.
     await expect
       .poll(
         async () => {
-          const s = await snap(b)
-          watch(s)
-          const p = get(s, idA)
-          return Math.abs(p.z - face) < EPS && Math.abs(p.x - start.x) < EPS && p.team === start.team && angleDiff(p.yaw, 0) < EPS
+          watch(await snap(b))
+          const p = observer!.at(idA)
+          return !!p && Math.abs(p.z - face) < EPS && Math.abs(p.x - start.x) < EPS && p.team === start.team && angleDiff(p.yaw, 0) < EPS
         },
-        { message: 'tab B sees A flush with the wall', timeout: WAIT_MS },
+        { message: 'the observer sees A flush with the wall', timeout: WAIT_MS },
       )
       .toBe(true)
     expect(seen, 'no tab ever saw a player overlap a solid or leave the ground').toEqual([])
   } finally {
+    await observer?.leave()
     await a.context().close()
     await b.context().close()
   }
@@ -170,12 +185,16 @@ test('rotated: a ghost turned about 45 degrees walks into a wall and slides alon
   test.setTimeout(90_000)
   let a: Tab | undefined
   let b: Tab | undefined
+  let observer: Observer | undefined
   try {
     a = await openTab(browser, 'tab A')
-    await joinedTab(a, 1)
+    await joinedTab(a, { ghosts: 1, wardens: 0 })
     b = await openTab(browser, 'tab B')
-    await joinedTab(b, 2)
-    const sa = await joinedTab(a, 2)
+    await joinedTab(b, { ghosts: 1, wardens: 1 })
+    // The observer, an SDK Ghost (the third joiner), is the other client that sees the ghost.
+    observer = await Observer.join()
+    const sa = await joinedTab(a, { ghosts: 2, wardens: 1 })
+    await observer.waitForPlayers(3)
     expect(sa.localTeam, 'the first tab of a fresh room is the ghost').toBe('ghost')
     const me = local(sa)
     const step = stepFor(me)
@@ -193,14 +212,16 @@ test('rotated: a ghost turned about 45 degrees walks into a wall and slides alon
     await lockPointer(a)
     const yaw = await turnTo(a, aim)
     expect(pathClear(me, yaw, run / Math.cos(yaw) - 0.1), `the path from ${me.x},${me.z} at yaw ${yaw} is clear up to the wall`).toBe(true)
-    for (const t of [a, b]) {
-      await expect
-        .poll(async () => angleDiff(get(await snap(t.page), me.id).yaw, yaw), { message: `${t.name} sees the ghost turn`, timeout: WAIT_MS })
-        .toBeLessThan(0.0101)
-    }
+    await expect
+      .poll(async () => angleDiff(get(await snap(a!.page), me.id).yaw, yaw), { message: 'tab A sees the ghost turn', timeout: WAIT_MS })
+      .toBeLessThan(0.0101)
+    await expect
+      .poll(() => angleDiff(observer!.at(me.id)?.yaw ?? Infinity, yaw), { message: 'the observer sees the ghost turn', timeout: WAIT_MS })
+      .toBeLessThan(0.0101)
 
     const stopA = await startSampler(a.page)
     const stopB = await startSampler(b.page)
+    const stopO = observer.record()
     let contact = NaN
     await a.page.keyboard.down('KeyW')
     try {
@@ -215,10 +236,13 @@ test('rotated: a ghost turned about 45 degrees walks into a wall and slides alon
     await a.page.waitForTimeout(250)
     const samplesA = await stopA()
     const samplesB = await stopB()
+    const samplesO = stopO()
     expectNoOverlap(samplesA, 'tab A')
     expectNoOverlap(samplesB, 'tab B')
+    expectNoOverlap(samplesO, 'the observer')
     expectGroundRoute(samplesA, 'tab A')
     expectGroundRoute(samplesB, 'tab B')
+    expectGroundRoute(samplesO, 'the observer')
 
     const all = track(samplesA, me.id).points
     // Approach: a straight line along (sin yaw, cos yaw) up to the face.
@@ -240,13 +264,14 @@ test('rotated: a ghost turned about 45 degrees walks into a wall and slides alon
 
     const end = get(await snap(a.page), me.id)
     await expect
-      .poll(async () => {
-        const p = get(await snap(b!.page), me.id)
-        return Math.abs(p.x - end.x) < EPS && Math.abs(p.z - face) < EPS && angleDiff(p.yaw, yaw) < EPS
-      }, { message: 'tab B sees the ghost flush with the wall where it stopped', timeout: WAIT_MS })
+      .poll(() => {
+        const p = observer!.at(me.id)
+        return !!p && Math.abs(p.x - end.x) < EPS && Math.abs(p.z - face) < EPS && angleDiff(p.yaw, yaw) < EPS
+      }, { message: 'the observer sees the ghost flush with the wall where it stopped', timeout: WAIT_MS })
       .toBe(true)
     for (const t of [a, b]) expect(t.errors, `${t.name}: no console errors`).toEqual([])
   } finally {
+    await observer?.leave()
     await closeTabs(a, b)
   }
 })

@@ -53,12 +53,100 @@ export function pos(room: GameRoom, sessionId: string): SyncedPlayer {
   return { x, z, team, yaw, ...(p.y !== undefined ? { y: p.y } : {}), ...(p.mode !== undefined ? { mode: p.mode } : {}) }
 }
 
-/** Player counts per team in `room`'s state. */
+/**
+ * Player counts per team in `room`'s state. Exact only for a Ghost client
+ * (a Ghost is sent everyone); a Warden client is not sent Ghosts it can't see
+ * since the M5 filter (#46). Use `teamCountsOf(rooms)` when the clients are
+ * all you have, or `teamCounts(godView(rooms))`.
+ */
 export function teamCounts(room: GameRoom): Record<Team, number> {
   const counts = Object.fromEntries(TEAMS.map((t) => [t, 0])) as Record<Team, number>
   room.state.players.forEach((_p, id) => counts[pos(room, id).team]++)
   return counts
 }
+
+// ---------------------------------------------------------------------------
+// Who sees whom (M5 filter, #45). Decision 11 on #38: a Warden client is sent
+// a Ghost only if it is near or in line of sight; a Ghost client is sent
+// everyone; every client gets itself and its own teammates. Specs must not
+// assume more than this. See also support/visibility.ts.
+// ---------------------------------------------------------------------------
+
+/** The team of the player `room` plays (a client always sees itself). */
+export function teamOf(room: GameRoom): Team {
+  return pos(room, room.sessionId).team
+}
+
+/** True if a client of team `viewer` is always sent a player of team `target`. */
+export const mustSee = (viewer: Team, target: Team): boolean => viewer === 'ghost' || target === 'warden'
+
+/**
+ * Player `id` of team `team` as `viewer` sees it, or undefined when the filter
+ * may legitimately not send it (a Ghost seen from a Warden). Throws if the
+ * viewer must see it (mustSee) and doesn't.
+ */
+export function seenPos(viewer: GameRoom, id: string, team: Team): SyncedPlayer | undefined {
+  if (viewer.state.players.has(id)) return pos(viewer, id)
+  if (mustSee(teamOf(viewer), team)) throw new Error(`${viewer.sessionId} (${teamOf(viewer)}) must see ${id} (${team}) but doesn't`)
+  return undefined
+}
+
+/**
+ * A client that is sent every player: the first Ghost client among `rooms`.
+ * Read "the truth" about other players from it (positions, health, ammo), not
+ * from a Warden client. Throws if every client is a Warden.
+ */
+export function godView(rooms: GameRoom[]): GameRoom {
+  const r = rooms.find((v) => teamOf(v) === 'ghost')
+  if (!r) throw new Error('no Ghost client among the rooms: nobody sees every player')
+  return r
+}
+
+/** Player counts per team, from each client's view of itself (always exact, filter or not). */
+export function teamCountsOf(rooms: GameRoom[]): Record<Team, number> {
+  const counts = Object.fromEntries(TEAMS.map((t) => [t, 0])) as Record<Team, number>
+  for (const r of rooms) counts[teamOf(r)]++
+  return counts
+}
+
+/**
+ * Leaves `room` if its connection is still open; never throws. Leaving a closed
+ * connection hangs (#44), so every cleanup goes through this.
+ */
+export async function leaveQuietly(room: GameRoom): Promise<void> {
+  if (room.connection.isOpen) await room.leave().catch(() => {})
+}
+
+/** Resolves once `room`'s state has player `id`; use instead of a player-count wait for a client that may not see everyone. */
+export function whenVisible(room: GameRoom, id: string): Promise<void> {
+  return waitForState(room, `${room.sessionId} is sent ${id}`, (s) => !!s.players?.has(id))
+}
+
+/** Resolves once `room`'s state no longer has player `id` (it left, or the filter stopped sending it). */
+export function whenGone(room: GameRoom, id: string): Promise<void> {
+  return waitForState(room, `${room.sessionId} is no longer sent ${id}`, (s) => !s.players?.has(id))
+}
+
+/**
+ * Waits until every client in `rooms` has what it must have: itself, and every
+ * player `mustSee` says it is always sent. A Ghost client must also hold
+ * exactly `rooms.length` players (nobody stale). A Warden client may hold
+ * more (Ghosts it can see), so its count is not checked.
+ */
+export async function waitMustSee(rooms: GameRoom[]): Promise<void> {
+  for (const r of rooms) await waitForState(r, `${r.sessionId} sees itself`, (s) => !!s.players?.has(r.sessionId))
+  for (const viewer of rooms) {
+    const vt = teamOf(viewer)
+    const ids = rooms.filter((t) => mustSee(vt, teamOf(t))).map((t) => t.sessionId)
+    await waitForState(viewer, `${viewer.sessionId} (${vt}) sees ${ids.length} players it must see`, (s) => {
+      if (!ids.every((id) => s.players?.has(id))) return false
+      return vt !== 'ghost' || s.players.size === rooms.length
+    })
+  }
+}
+
+/** Waits until `sizeIs`-style: a Ghost client holds `n` players. Kept for specs with only Ghosts in the room. */
+export const sizeIs = (n: number) => (s: GameRoomState) => s.players?.size === n
 
 /** Resolves once `predicate(room.state)` holds, checking now and on every state change. */
 export function waitForState(room: GameRoom, what: string, predicate: (s: GameRoomState) => boolean): Promise<void> {
@@ -85,13 +173,11 @@ export function waitForState(room: GameRoom, what: string, predicate: (s: GameRo
   })
 }
 
-export const sizeIs = (n: number) => (s: GameRoomState) => s.players?.size === n
-
 /**
  * Creates a fresh room and joins `n` clients to it one at a time, in order,
- * pushing each into `open` (left after the test). Everyone sees each joiner
- * before the next one joins, so join order is strict. `options(i)` gives the
- * join options of joiner i (0-based).
+ * pushing each into `open` (left after the test). Every client sees what it
+ * must (waitMustSee) before the next one joins, so join order is strict.
+ * `options(i)` gives the join options of joiner i (0-based).
  */
 export async function joinInOrder(n: number, open: GameRoom[], options: (i: number) => object = () => ({})): Promise<GameRoom[]> {
   const first = (await new Client(endpoint).create(ROOM_NAME, options(0))) as GameRoom
@@ -102,23 +188,24 @@ export async function joinInOrder(n: number, open: GameRoom[], options: (i: numb
   return rooms
 }
 
-/** Joins one more client to `roomId`; waits until it and everyone in `rooms` see the new size. */
+/** Joins one more client to `roomId`; waits until everyone (the joiner included) sees what they must (waitMustSee). */
 export async function joinRoom(roomId: string, rooms: GameRoom[], open: GameRoom[], options: object = {}): Promise<GameRoom> {
   const r = (await new Client(endpoint).joinById(roomId, options)) as GameRoom
   rooms.push(r)
   open.push(r)
-  const n = rooms.length
-  for (const room of rooms) await waitForState(room, `${room.sessionId} sees ${n} players`, sizeIs(n))
+  await waitMustSee(rooms)
   return r
 }
 
-/** Leaves `room`, removes it from `rooms`, and waits until everyone left sees the new size. */
+/** Leaves `room`, removes it from `rooms`, and waits until every client left no longer holds it (and a Ghost client holds exactly the rest). */
 export async function leaveRoom(room: GameRoom, rooms: GameRoom[]): Promise<void> {
   const i = rooms.indexOf(room)
   if (i < 0) throw new Error('room not in list')
+  const id = room.sessionId
   rooms.splice(i, 1)
   await room.leave()
-  for (const r of rooms) await waitForState(r, `${r.sessionId} sees ${rooms.length} players`, sizeIs(rooms.length))
+  for (const r of rooms) await whenGone(r, id)
+  await waitMustSee(rooms)
 }
 
 // ---------------------------------------------------------------------------

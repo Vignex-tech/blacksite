@@ -2,6 +2,8 @@ import { expect, test, type Browser, type Page } from '@playwright/test'
 import type { BlacksitePlayerSnapshot, BlacksiteSnapshot } from '../../shared/testhook.js'
 import { angleDiff } from './support/intent.js'
 import { expectOnGround, expectTeamsAndYaws } from './support/hook.js'
+import { Observer } from './support/observer.js'
+import { guaranteedPlayers, type Makeup } from './support/tabs.js'
 
 // Milestone #1 (issue #5), moved onto the client test hook in #12: two browser
 // tabs join the shared room and each sees the other player move.
@@ -24,6 +26,12 @@ import { expectOnGround, expectTeamsAndYaws } from './support/hook.js'
 // `yaw` and `localTeam`; both tabs agree on them; the first tab in a fresh
 // room is a Ghost and the second a Warden; the HUD names the tab's own team.
 // A yaw sent by another client is covered in facing.spec.ts.
+//
+// Since #45 these specs hold with the M5 visibility filter (#46): tab A (the
+// Ghost) is sent every player, tab B (the Warden) itself and any Ghost it is
+// near or can see, so tab B is never required to see A. "Another client sees A
+// move" is checked by an SDK Ghost observer (support/observer.ts, the third
+// joiner) next to tab A; tab B is checked for what it must hold (itself).
 //
 // Pages joinOrCreate the shared `my_room`, so the browser specs run on a
 // single worker (playwright.config.ts) and no other spec's page can join.
@@ -64,26 +72,47 @@ async function openPlayer(browser: Browser): Promise<Page> {
   return page
 }
 
-/** Waits until the tab is connected and knows two players; returns its sessionId. */
-async function joined(page: Page): Promise<string> {
+/** The room as the tests set it up: tab A (ghost) and tab B (warden); with the observer, a second ghost. */
+const ROOM_1V1: Makeup = { ghosts: 1, wardens: 1 }
+const ROOM_WITH_OBSERVER: Makeup = { ghosts: 2, wardens: 1 }
+
+/**
+ * Waits until the tab is connected, knows its team and sees the players it must
+ * see in a room of `m` (a Ghost tab: all of them; a Warden tab: at least its
+ * Wardens). Returns its sessionId.
+ */
+async function joined(page: Page, m: Makeup = ROOM_1V1): Promise<string> {
   await expect
     .poll(
       async () => {
         const s = await snap(page)
-        return s.connected && s.sessionId !== null && s.players.length === 2
+        if (!(s.connected && s.sessionId !== null && s.localTeam !== null)) return false
+        const need = guaranteedPlayers(s.localTeam, m)
+        return s.localTeam === 'ghost' ? s.players.length === need : s.players.length >= need
       },
-      { message: 'tab is connected and sees 2 players', timeout: WAIT_MS },
+      { message: `tab is connected and sees the players it must see (${m.ghosts} ghosts, ${m.wardens} wardens)`, timeout: WAIT_MS },
     )
     .toBe(true)
   return (await snap(page)).sessionId!
 }
 
+/** Every player the observer (an SDK Ghost, sent everyone) holds, with x and z. */
+function observed(o: Observer): Record<string, { x: number; z: number }> {
+  const out: Record<string, { x: number; z: number }> = {}
+  o.room.state.players.forEach((p, id: string) => {
+    out[id] = { x: (p as unknown as { x: number }).x, z: (p as unknown as { z: number }).z }
+  })
+  return out
+}
+
 /**
- * Waits until both tabs agree on every player's position and nothing changed
- * since the previous poll (all moves sent so far have been applied and synced).
- * Returns both settled snapshots.
+ * Waits until tab A, tab B and the observer agree on every player's position
+ * wherever they hold it, and nothing changed since the previous poll (all moves
+ * sent so far have been applied and synced). Tab A (a Ghost) and the observer
+ * must hold every id; tab B (a Warden) must hold `idB` (itself) and may not
+ * hold the Ghost. Returns both tabs' settled snapshots.
  */
-async function settle(a: Page, b: Page, ids: string[]): Promise<{ a: BlacksiteSnapshot; b: BlacksiteSnapshot }> {
+async function settle(a: Page, b: Page, o: Observer, ids: string[], idB: string): Promise<{ a: BlacksiteSnapshot; b: BlacksiteSnapshot }> {
   let prev: BlacksiteSnapshot | null = null
   let last: { a: BlacksiteSnapshot; b: BlacksiteSnapshot } | null = null
   await expect
@@ -91,17 +120,20 @@ async function settle(a: Page, b: Page, ids: string[]): Promise<{ a: BlacksiteSn
       async () => {
         const sa = await snap(a)
         const sb = await snap(b)
+        const so = observed(o)
         const p = prev
         prev = sa
         last = { a: sa, b: sb }
         return ids.every((id) => {
           const pa = find(sa, id)
           const pb = find(sb, id)
+          const po = so[id]
           const pp = p && find(p, id)
-          return !!pa && !!pb && !!pp && same(pa, pb) && same(pa, pp)
+          if (id === idB && !pb) return false
+          return !!pa && !!po && !!pp && same(pa, po) && same(pa, pp) && (!pb || same(pa, pb))
         })
       },
-      { message: 'both tabs agree on every position and it is stable', intervals: [150], timeout: WAIT_MS },
+      { message: 'all views agree on every position and it is stable', intervals: [150], timeout: WAIT_MS },
     )
     .toBe(true)
   return last!
@@ -179,15 +211,20 @@ test('test hook: snapshot shape, one local player, and a copy per call', async (
     }
     expect(sa.localTeam).toBe('ghost')
     expect(sb.localTeam).toBe('warden')
+    // Tab A (a Ghost) holds both players; tab B (a Warden) holds itself and may not hold the Ghost.
+    expect(sa.players.map((p) => p.id)).toEqual([idA, idB].sort())
+    expect(find(sb, idB), 'tab B holds itself').toBeDefined()
     for (const p of sa.players) {
-      const q = get(sb, p.id)
+      const q = find(sb, p.id)
+      if (!q) continue
       expect(q.team, `both tabs agree on ${p.id}'s team`).toBe(p.team)
       expect(angleDiff(q.yaw, p.yaw), `both tabs agree on ${p.id}'s yaw`).toBeLessThan(EPS)
     }
 
     // The HUD names each tab's own team.
     await expect(a.locator('#hud')).toHaveText(/online, 2 players, you are a Ghost$/, { timeout: WAIT_MS })
-    await expect(b.locator('#hud')).toHaveText(/online, 2 players, you are a Warden$/, { timeout: WAIT_MS })
+    // The Warden's count is 1 (itself) or 2 (it also sees the Ghost): the filter decides.
+    await expect(b.locator('#hud')).toHaveText(/online, [12] players?, you are a Warden$/, { timeout: WAIT_MS })
     for (const [page, s] of [
       [a, sa],
       [b, sb],
@@ -214,8 +251,12 @@ test('test hook: snapshot shape, one local player, and a copy per call', async (
           yaw: expect.any(Number),
         })
       }
-      // Both tabs know the same two players, sorted by id.
-      expect(s.players.map((p) => p.id)).toEqual([idA, idB].sort())
+      // The Ghost tab knows both players, sorted by id; the Warden tab itself and maybe the Ghost.
+      if (own === idA) expect(s.players.map((p) => p.id)).toEqual([idA, idB].sort())
+      else {
+        expect(s.players.map((p) => p.id)).toContain(idB)
+        for (const p of s.players) expect([idA, idB]).toContain(p.id)
+      }
       // Exactly one player is local, and it is this tab's sessionId.
       const local = s.players.filter((p) => p.isLocal)
       expect(local).toHaveLength(1)
@@ -265,58 +306,58 @@ test('test hook: snapshot shape, one local player, and a copy per call', async (
   }
 })
 
-test('two tabs share the room and each sees the other move', async ({ browser }) => {
+test('two tabs share the room and the other clients see A move', async ({ browser }) => {
   test.setTimeout(90_000)
   const a = await openPlayer(browser)
   const b = await openPlayer(browser)
+  let observer: Observer | undefined
   try {
-    // Both tabs joined the same room and each knows both players.
+    // Both tabs joined the same room; tab A holds both players, tab B itself.
     const idA = await joined(a)
     const idB = await joined(b)
     expect(idA).not.toBe(idB)
+    // The observer (an SDK Ghost, sent every player) is the third joiner: the "other client" that sees A.
+    observer = await Observer.join()
+    await observer.waitForPlayers(3)
+    await joined(a, ROOM_WITH_OBSERVER)
+    await joined(b, ROOM_WITH_OBSERVER)
     const ids = [idA, idB]
+    expect(Object.keys(observed(observer)).sort()).toEqual([idA, idB, observer.id].sort())
 
-    // Both tabs agree on both positions.
-    const start = await settle(a, b, ids)
-    for (const id of ids) {
-      expect(same(get(start.a, id), get(start.b, id)), `${id} agrees across tabs`).toBe(true)
-    }
+    // The views agree on both positions.
+    const start = await settle(a, b, observer, ids, idB)
     const b0 = get(start.b, idB)
 
-    // Hold D in tab A: A's x rises.
+    // Hold D in tab A: A's x rises in tab A and as the observer sees it.
     const a0 = get(start.a, idA)
     await holdUntil(a, 'KeyD', "A's x rises in tab A", (s) => get(s, idA).x > a0.x + MOVE_UNITS)
-    const afterD = await settle(a, b, ids)
-    for (const s of [afterD.a, afterD.b]) {
-      expect(get(s, idA).x, `A's x rose in ${s.sessionId === idA ? 'tab A' : 'tab B'}`).toBeGreaterThan(
-        a0.x + MOVE_UNITS,
-      )
-    }
+    const afterD = await settle(a, b, observer, ids, idB)
+    expect(get(afterD.a, idA).x, "A's x rose in tab A").toBeGreaterThan(a0.x + MOVE_UNITS)
+    expect(observed(observer)[idA].x, "A's x rose as the observer sees it").toBeGreaterThan(a0.x + MOVE_UNITS)
 
     // Hold W in tab A: A's z rises.
     const a1 = get(afterD.a, idA)
     await holdUntil(a, 'KeyW', "A's z rises in tab A", (s) => get(s, idA).z > a1.z + MOVE_UNITS)
-    const afterW = await settle(a, b, ids)
-    for (const s of [afterW.a, afterW.b]) {
-      expect(get(s, idA).z, `A's z rose in ${s.sessionId === idA ? 'tab A' : 'tab B'}`).toBeGreaterThan(
-        a1.z + MOVE_UNITS,
-      )
-    }
+    const afterW = await settle(a, b, observer, ids, idB)
+    expect(get(afterW.a, idA).z, "A's z rose in tab A").toBeGreaterThan(a1.z + MOVE_UNITS)
+    expect(observed(observer)[idA].z, "A's z rose as the observer sees it").toBeGreaterThan(a1.z + MOVE_UNITS)
 
-    // settle() checked that both tabs agree on both positions. B never
-    // pressed a key: it has not moved in either tab.
+    // settle() checked that the views agree. B never pressed a key: it has
+    // not moved in any view.
     for (const s of [afterD.a, afterD.b, afterW.a, afterW.b]) {
       expect(same(get(s, idB), b0), `B did not move (seen by ${s.sessionId})`).toBe(true)
     }
+    expect(same(observed(observer)[idB], b0), 'B did not move (seen by the observer)').toBe(true)
 
-    // Still exactly two players in each tab, both still on the ground and
-    // clear of ramps, pockets and climb spots after A's short walk (#28).
+    // All players on the ground and clear of ramps, pockets and climb spots
+    // after A's short walk (#28).
     for (const s of [afterD.a, afterD.b, afterW.a, afterW.b]) expectOnGround(s)
-    for (const s of [afterW.a, afterW.b]) {
-      expect(s.connected).toBe(true)
-      expect(s.players).toHaveLength(2)
-    }
+    expect(afterW.a.connected).toBe(true)
+    expect(afterW.a.players, 'tab A holds A, B and the observer').toHaveLength(3)
+    expect(afterW.b.connected).toBe(true)
+    expect(find(afterW.b, idB), 'tab B holds itself').toBeDefined()
   } finally {
+    await observer?.leave()
     await a.context().close()
     await b.context().close()
   }
@@ -329,19 +370,22 @@ test('closing a tab drops the other tab to 1 player', async ({ browser }) => {
   try {
     const idA = await joined(a)
     const idB = await joined(b)
-    await a.context().close()
+    // Tab A (a Ghost) holds both players, so it is the tab that can watch B leave
+    // (tab B, a Warden, may never have been sent A).
+    expect(find(await snap(a), idB), 'tab A holds B before it leaves').toBeDefined()
+    await b.context().close()
     await expect
       .poll(
         async () => {
-          const s = await snap(b)
+          const s = await snap(a)
           return s.players.map((p) => p.id).join(',')
         },
-        { message: 'tab B sees only itself', timeout: WAIT_MS },
+        { message: 'tab A sees only itself', timeout: WAIT_MS },
       )
-      .toBe(idB)
-    expect(find(await snap(b), idA)).toBeUndefined()
+      .toBe(idA)
+    expect(find(await snap(a), idB)).toBeUndefined()
   } finally {
     await a.context().close().catch(() => {})
-    await b.context().close()
+    await b.context().close().catch(() => {})
   }
 })

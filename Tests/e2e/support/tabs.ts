@@ -58,25 +58,41 @@ export async function openTab(
   return { page, name, errors, sent }
 }
 
+/** How many players of each team are in the room. */
+export interface Makeup {
+  ghosts: number
+  wardens: number
+}
+
 /**
- * Waits until the tab is connected, sees `n` players each with a team, and
- * its camera has left 'overhead' (the team camera is on). Returns the snapshot.
+ * How many players a tab of `team` is always sent when the room holds `m` (M5
+ * filter, #45): a Ghost tab is sent everyone; a Warden tab itself and its
+ * Wardens, and any Ghost that is near or in its line of sight (so not counted).
  */
-export async function joined(tab: Tab, n: number): Promise<BlacksiteSnapshot> {
+export const guaranteedPlayers = (team: Team, m: Makeup): number => (team === 'ghost' ? m.ghosts + m.wardens : m.wardens)
+
+/**
+ * Waits until the tab is connected, knows its team, sees every player it is
+ * guaranteed to see when the room holds `m` (a Ghost tab: exactly all of
+ * them; a Warden tab: at least its Wardens, since Ghosts it can't see are not
+ * sent), each with a team, and its camera has left 'overhead' (the team
+ * camera is on). Returns the snapshot.
+ */
+export async function joined(tab: Tab, m: Makeup): Promise<BlacksiteSnapshot> {
   await expect
     .poll(
       async () => {
         const s = await snap(tab.page)
+        if (!(s.connected && s.sessionId !== null && s.localTeam !== null)) return false
+        const need = guaranteedPlayers(s.localTeam, m)
         return (
-          s.connected &&
-          s.sessionId !== null &&
-          s.players.length === n &&
+          (s.localTeam === 'ghost' ? s.players.length === need : s.players.length >= need) &&
           s.players.every((p) => p.team !== null) &&
           s.camera !== undefined &&
           s.camera.mode !== 'overhead'
         )
       },
-      { message: `${tab.name} is connected, sees ${n} players with teams, and has its team camera`, timeout: WAIT_MS },
+      { message: `${tab.name} is connected, sees the players it must see in a room of ${m.ghosts} Ghosts and ${m.wardens} Wardens, and has its team camera`, timeout: WAIT_MS },
     )
     .toBe(true)
   return snap(tab.page)

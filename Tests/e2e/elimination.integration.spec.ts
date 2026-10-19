@@ -16,7 +16,8 @@ import {
   type Team,
 } from '../../shared/protocol.js'
 import { feetY } from './support/geometry.js'
-import { Walker, joinInOrder, joinRoom, leaveRoom, pos, waitForState, type GameRoom } from './support/sdk.js'
+import { Walker, godView, joinInOrder, joinRoom, leaveRoom, mustSee, pos, teamOf, waitForState, whenVisible, type GameRoom } from './support/sdk.js'
+import { visibilityOf } from './support/visibility.js'
 import { collectEvents, vitalsOf } from './support/vitals.js'
 
 // M5 reload, kills and eliminated players (#43, verified in #44) through real
@@ -26,6 +27,13 @@ import { collectEvents, vitalsOf } from './support/vitals.js'
 // tests in server/test/MyRoomReload.test.ts, and the hanging case is not
 // repeated here because getting a Ghost onto a ledge in front of a Warden's
 // line of sight would add a long walk. Expected numbers come from shared/.
+//
+// Since #45 these specs hold with the M5 visibility filter (#46): a Warden
+// client is not sent a Ghost it can't see. The two players first walk onto the
+// south doorway line, so the Warden does see the Ghost (`whenVisible`); aim
+// angles and "is it still in the room" are read from the Ghost client (sent
+// every player); a fresh Ghost that joins after a kill is not required to be
+// visible to the Warden.
 //
 // Per Docs/handoff.md: problems are collected and asserted once, after the SDK
 // clients have left; the server steps every 50 ms; spawns are random, so the
@@ -64,7 +72,7 @@ function quiet(...rooms: GameRoom[]) {
   for (const r of rooms) for (const t of [SHOT_EVENT, HIT_EVENT, DAMAGED_EVENT]) r.onMessage(t, () => {})
 }
 
-/** Yaw and pitch from the shooter's eye to the target's head, as `viewer` sees them. */
+/** Yaw and pitch from the shooter's eye to the target's head, as `viewer` sees them. `viewer` must be a Ghost client: a Warden client is not sent a Ghost it can't see. */
 function aimAtHead(viewer: GameRoom, shooterId: string, targetId: string) {
   const s = viewer.state.players.get(shooterId) as unknown as { x: number; y: number; z: number }
   const t = viewer.state.players.get(targetId) as unknown as { x: number; y: number; z: number }
@@ -72,6 +80,11 @@ function aimAtHead(viewer: GameRoom, shooterId: string, targetId: string) {
   const dz = t.z - s.z
   const dy = feetY(t) + HEAD_Y - (feetY(s) + EYE_HEIGHT)
   return { yaw: Math.atan2(dx, dz), pitch: Math.atan2(dy, Math.hypot(dx, dz)) }
+}
+
+/** Of two clients, the one that is a Ghost: it is sent every player. */
+function godViewOf(a: GameRoom, b: GameRoom): GameRoom {
+  return godView([a, b])
 }
 
 /** What a client can see of one player: position, facing, mode and vitals. */
@@ -87,6 +100,10 @@ async function faceOff() {
   const gw = new Walker(g, 'ghost', { ground: false })
   const ww = new Walker(w, 'warden', { ground: false })
   await Promise.all([gw.walkTo({ x: 0, z: gw.pos.z }), ww.walkTo({ x: 0, z: ww.pos.z })])
+  // On the doorway line the Warden sees the Ghost (its head clears the 1.2 cover), so the
+  // Warden client is sent it; wait for that before anything reads the Ghost from the Warden.
+  expect(visibilityOf(ww.state, gw.state), 'the Ghost is not hidden from the Warden on x = 0').not.toBe('hidden')
+  await whenVisible(w, g.sessionId)
   return { g, w, gw, ww }
 }
 
@@ -97,7 +114,7 @@ async function faceOff() {
  * accepted them would show it.
  */
 async function hammer(dead: GameRoom, opponent: GameRoom) {
-  const aim = aimAtHead(opponent, me(dead), me(opponent))
+  const aim = aimAtHead(godViewOf(dead, opponent), me(dead), me(opponent))
   const moves = (async () => {
     const payloads: unknown[] = [
       { dx: 1, dz: 0, yaw: 1 },
@@ -153,7 +170,7 @@ async function killAndLockOut(shooterTeam: Team) {
   const healthAfterHit: (number | undefined)[] = []
   for (let i = 1; i <= hitsToKill; i++) {
     await sleep(weapon.intervalMs + 100)
-    fire(shooter, aimAtHead(shooter, sid, vid))
+    fire(shooter, aimAtHead(godViewOf(shooter, victim), sid, vid))
     const want = Math.max(0, MAX_HEALTH[victimTeam] - i * weapon.damage)
     await waitValue(shooter, `hit ${i} lands`, () => health(shooter, vid), want)
     healthAfterHit.push(health(shooter, vid))
@@ -163,7 +180,8 @@ async function killAndLockOut(shooterTeam: Team) {
   const before = { dead: snap(victim, vid), seenByOther: snap(shooter, vid), shooter: snap(shooter, sid) }
   await hammer(victim, shooter)
   const after = { dead: snap(victim, vid), seenByOther: snap(shooter, vid), shooter: snap(shooter, sid) }
-  const stillInRoom = victim.connection.isOpen && shooter.state.players.has(vid) && shooter.state.players.size === 2
+  const everything = godViewOf(shooter, victim) // the Ghost client is sent both players
+  const stillInRoom = victim.connection.isOpen && everything.state.players.has(vid) && everything.state.players.size === 2
   const violations = [...gw.violations, ...ww.violations]
 
   // The dead client leaves and a new one joins: a fresh live player.
@@ -171,8 +189,10 @@ async function killAndLockOut(shooterTeam: Team) {
   await leaveRoom(victim, live)
   const rejoined = await joinRoom(shooter.roomId, live, open)
   const fresh = { ...snap(rejoined, me(rejoined)), team: pos(rejoined, me(rejoined)).team }
-  const freshSeenByOther = snap(shooter, me(rejoined))
-  const oldGone = !shooter.state.players.has(vid)
+  // The shooter sees the fresh player only if it must: a Warden shooter is not sent a fresh Ghost (the filter).
+  const freshSeenByOther = shooter.state.players.has(me(rejoined)) ? snap(shooter, me(rejoined)) : undefined
+  const freshSentWhenRequired = shooter.state.players.has(me(rejoined)) || !mustSee(teamOf(shooter), fresh.team)
+  const oldGone = [shooter, rejoined].every((r) => !r.state.players.has(vid))
   rejoined.onMessage(SHOT_EVENT, () => {})
   const rejoinedAmmo = WEAPONS[fresh.team].magazine
   fire(rejoined, SKY)
@@ -187,6 +207,7 @@ async function killAndLockOut(shooterTeam: Team) {
     stillInRoom,
     fresh,
     freshSeenByOther,
+    freshSentWhenRequired,
     oldGone,
     violations,
   }
@@ -244,7 +265,8 @@ function expectLockedOut(result: Awaited<ReturnType<typeof killAndLockOut>>['res
   expect(result.fresh.mode).toBe('ground')
   expect(result.fresh.ammo).toBe(WEAPONS[result.fresh.team].magazine)
   expect(result.fresh.reloading).toBeFalsy()
-  expect(result.freshSeenByOther.health).toBe(MAX_HEALTH[result.fresh.team])
+  expect(result.freshSentWhenRequired, 'the shooter is sent the fresh player when it must be').toBe(true)
+  if (result.freshSeenByOther) expect(result.freshSeenByOther.health).toBe(MAX_HEALTH[result.fresh.team])
 }
 
 test('reload takes about reloadMs, refills the magazine, blocks fire meanwhile; a second reload or a flood changes nothing', async () => {

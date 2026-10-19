@@ -282,13 +282,14 @@ test('the server exports the climbing constants: CLIMB_STEP, SHIMMY_STEP and MAN
 
 test('M4 gate (Ghost, west route): spawn to climb-west, climb, hang, mantle onto the mezzanine at UPPER_LEVEL_Y; then walk off its south edge, grab ledge-mezz-south, shimmy end to end, over-budget and wrong-mode actions change nothing, drop to the ground', async () => {
   test.setTimeout(90_000)
-  const [g, wd] = await joinInOrder(2, open)
+  // obs is a second Ghost: it is sent every player, so it can watch the first Ghost (a Warden might not be sent it, #45).
+  const [g, wd, obs] = await joinInOrder(3, open)
   const ghost = new Walker(g, 'ghost', { ground: false })
   const warden = new Walker(wd, 'warden', { ground: false })
   expect(ghost.state.team).toBe('ghost')
   expect(warden.state.team).toBe('warden')
   const gSeen = track(g, g.sessionId)
-  const gSeenByW = track(wd, g.sessionId)
+  const gSeenByW = track(obs, g.sessionId)
   const wSeen = track(wd, wd.sessionId)
   const log: string[] = []
 
@@ -388,10 +389,10 @@ test('M4 gate (Ghost, west route): spawn to climb-west, climb, hang, mantle onto
   await Promise.all([ghostRun(), wardenRun()])
   test.info().annotations.push({ type: 'west route', description: log.join('\n') })
   expect(wSeen.samples.filter((s) => s.mode !== 'ground' || Math.abs(s.y) > EPS), 'warden on the ground throughout').toEqual([])
-  expect(modeSequence(gSeenByW.samples), "the warden's client saw the same transitions").toEqual(modeSequence(gSeen.samples))
+  expect(modeSequence(gSeenByW.samples), "the observer's client saw the same transitions").toEqual(modeSequence(gSeen.samples))
   expectClean([ghost, warden], [
     { who: 'ghost', team: 'ghost', seen: gSeen },
-    { who: "ghost (warden's view)", team: 'ghost', seen: gSeenByW },
+    { who: "ghost (observer's view)", team: 'ghost', seen: gSeenByW },
     { who: 'warden', team: 'warden', seen: wSeen },
   ])
 })

@@ -8,7 +8,7 @@ import { GRAYBOX_MAP, PLAYER_HALF_SIZE, PLAYER_HEIGHT, UPPER_LEVEL_Y, type Climb
 import type { BlacksitePlayerSnapshot, BlacksiteSnapshot } from '../../shared/testhook.js'
 import { MANTLE_DISTANCE } from '../../server/build/rooms/MyRoom.js'
 import { inRect } from './support/geometry.js'
-import { endpoint, waitForState, type GameRoom } from './support/sdk.js'
+import { endpoint, leaveQuietly, waitForState, type GameRoom } from './support/sdk.js'
 import { track } from './support/track.js'
 import { closeTabs, joined, local, openTab, snap, startSampler, VIEWPORT, type Sample, type Tab } from './support/tabs.js'
 
@@ -44,6 +44,9 @@ import { closeTabs, joined, local, openTab, snap, startSampler, VIEWPORT, type S
 // Problems found in per-sample records are collected and asserted once, after
 // the SDK clients have left (thousands of expect() calls block the worker
 // long enough for the server's ping to drop SDK clients, #34).
+//
+// Since #45 this holds with the M5 visibility filter (#46): every assertion reads
+// a client's own player, or waits only for the players that client must be sent.
 //
 // Room: browser pages joinOrCreate the shared `my_room`, and the chromium
 // project runs on one worker, so the room is fresh: tab A is the Ghost, tab B
@@ -273,9 +276,9 @@ test('M4 gate: by keys, a Ghost climbs climb-west, hangs, drops and mantles to t
   let b: Tab | undefined
   try {
     a = await openTab(browser, 'tab A (ghost)')
-    const sa = await joined(a, 1)
+    const sa = await joined(a, { ghosts: 1, wardens: 0 })
     b = await openTab(browser, 'tab B (warden)')
-    const sb = await joined(b, 2)
+    const sb = await joined(b, { ghosts: 1, wardens: 1 })
     const ghostTab = a
     const wardenTab = b
     expect(sa.localTeam, 'the 1st joiner of the fresh room is a Ghost').toBe('ghost')
@@ -306,7 +309,8 @@ test('M4 gate: by keys, a Ghost climbs climb-west, hangs, drops and mantles to t
       await waitForState(g, 'the SDK ghost joins the tabs’ room', (s) => s.players.size === 3 && s.players.has(idA) && s.players.has(idB))
       const w = (await new Client(endpoint).joinOrCreate(ROOM_NAME)) as GameRoom
       rooms.push(w)
-      await waitForState(w, 'the SDK warden joins the tabs’ room', (s) => s.players.size === 4 && s.players.has(g.sessionId))
+      // A Warden client is sent only itself and its teammates (tab B), not the Ghosts (#45).
+      await waitForState(w, 'the SDK warden joins the tabs’ room', (s) => s.players.has(w.sessionId) && s.players.has(idB))
       const seen = [g, w].map((r) => ({ r, tr: track(r, r.sessionId), team: (r.state.players.get(r.sessionId) as unknown as { team: string }).team }))
       const problems: string[] = []
       if (seen[0].team !== 'ghost' || seen[1].team !== 'warden') problems.push(`SDK teams are ${seen[0].team} and ${seen[1].team}`)
@@ -337,7 +341,7 @@ test('M4 gate: by keys, a Ghost climbs climb-west, hangs, drops and mantles to t
         problems.push(...tr.bad)
         if (!r.connection.isOpen) problems.push(`${r.sessionId} was disconnected`)
       }
-      for (const r of rooms.splice(0)) await r.leave().catch(() => {})
+      for (const r of rooms.splice(0)) await leaveQuietly(r)
       return problems
     })()
     forged.catch(() => {}) // awaited below
@@ -529,7 +533,7 @@ test('M4 gate: by keys, a Ghost climbs climb-west, hangs, drops and mantles to t
     expect(ghostTab.errors).toEqual([])
     expect(wardenTab.errors).toEqual([])
   } finally {
-    for (const r of rooms) await r.leave().catch(() => {})
+    for (const r of rooms) await leaveQuietly(r)
     await closeTabs(a, b)
   }
 })

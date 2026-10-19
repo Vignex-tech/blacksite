@@ -10,11 +10,15 @@ import {
   Walker,
   endpoint,
   expectFacingPlusZ,
+  godView,
   joinInOrder,
   joinRoom,
   leaveRoom,
   pos,
+  seenPos,
   teamCounts,
+  teamCountsOf,
+  teamOf,
   waitForState,
   type GameRoom,
 } from './support/sdk.js'
@@ -24,6 +28,11 @@ import {
 // speed, camera-relative moves with a validated and wrapped yaw, and the rate
 // limit on rotated and turn-only moves. Expected values come from
 // shared/protocol.js and #18's formula (support/intent.ts), not server code.
+//
+// Since #45 these specs hold with the M5 visibility filter (#46): a Warden
+// client is not sent a Ghost it can't see, so team counts and Ghost positions
+// are read from a Ghost client (godView, sent everyone), from each client's
+// view of itself (teamCountsOf), or from an extra Ghost observer.
 
 const open: GameRoom[] = []
 test.afterEach(async () => {
@@ -37,10 +46,15 @@ function expectedTeam(counts: Record<Team, number>): Team {
   return best
 }
 
-/** Checks one freshly spawned player as every client in `viewers` sees it. */
+/**
+ * Checks one freshly spawned player as every client in `viewers` sees it. A
+ * Warden client may not be sent a Ghost (the filter): it is checked only if it
+ * is; a client that must see the player (mustSee) fails if it doesn't.
+ */
 function expectFreshSpawn(viewers: GameRoom[], id: string, team: Team, who: string) {
   for (const v of viewers) {
-    const p = pos(v, id)
+    const p = seenPos(v, id, team)
+    if (!p) continue
     expect(p.team, `${who}'s team as ${v.sessionId} sees it`).toBe(team)
     expectFacingPlusZ(p, who)
     expect(inRect(p, GRAYBOX_MAP.spawnAreas[team]), `${who} at ${p.x},${p.z} is in the ${team} area`).toBe(true)
@@ -74,16 +88,21 @@ test('balance: 2 joiners make 1v1, 4 make 2v2, 8 make 4v4, counts never differ b
   expectFreshSpawn(rooms, first.sessionId, 'ghost', 'joiner 1')
 
   for (let i = 1; i < MAX_CLIENTS; i++) {
-    const want = expectedTeam(teamCounts(first))
+    const want = expectedTeam(teamCounts(first)) // first is a Ghost: it is sent everyone
     const r = await joinRoom(first.roomId, rooms, open)
     expectFreshSpawn(rooms, r.sessionId, want, `joiner ${i + 1}`)
-    for (const v of rooms) {
+    // Every Ghost client sees all the players; a Warden client only some, so the
+    // counts from each client's view of itself must balance too.
+    for (const v of rooms.filter((x) => teamOf(x) === 'ghost')) {
       const c = teamCounts(v)
       expect(Math.abs(c.ghost - c.warden), `after ${i + 1} joins ${v.sessionId} sees ${countsText(c)}`).toBeLessThanOrEqual(1)
     }
+    const own = teamCountsOf(rooms)
+    expect(Math.abs(own.ghost - own.warden), `after ${i + 1} joins the clients are ${countsText(own)}`).toBeLessThanOrEqual(1)
     const n = i + 1
     if (n === 2 || n === 4 || n === 8) {
       expect(teamCounts(first), `${n} joiners`).toEqual({ ghost: n / 2, warden: n / 2 })
+      expect(own, `${n} joiners, by each client's own team`).toEqual({ ghost: n / 2, warden: n / 2 })
     }
   }
 
@@ -91,9 +110,12 @@ test('balance: 2 joiners make 1v1, 4 make 2v2, 8 make 4v4, counts never differ b
   await expect(new Client(endpoint).joinById(first.roomId), 'a 9th join is refused').rejects.toThrow()
   for (const v of rooms) {
     expect(v.connection.isOpen).toBe(true)
-    expect(v.state.players.size).toBe(MAX_CLIENTS)
+    // A Ghost client holds all 8; a Warden client holds its 4 Wardens plus the Ghosts it can see.
+    if (teamOf(v) === 'ghost') expect(v.state.players.size).toBe(MAX_CLIENTS)
+    else expect(v.state.players.size).toBeGreaterThanOrEqual(MAX_TEAM_SIZE)
   }
   expect(teamCounts(first)).toEqual({ ghost: MAX_TEAM_SIZE, warden: MAX_TEAM_SIZE })
+  expect(teamCountsOf(rooms)).toEqual({ ghost: MAX_TEAM_SIZE, warden: MAX_TEAM_SIZE })
 
   // A warden leaves: the seat opens again and the next joiner fills it as a warden.
   const warden = rooms.find((r) => pos(first, r.sessionId).team === 'warden' && r !== first)!
@@ -101,6 +123,7 @@ test('balance: 2 joiners make 1v1, 4 make 2v2, 8 make 4v4, counts never differ b
   const back = await joinRoom(first.roomId, rooms, open)
   expectFreshSpawn(rooms, back.sessionId, 'warden', 'the joiner after a warden left')
   expect(teamCounts(first)).toEqual({ ghost: MAX_TEAM_SIZE, warden: MAX_TEAM_SIZE })
+  expect(teamCountsOf(rooms)).toEqual({ ghost: MAX_TEAM_SIZE, warden: MAX_TEAM_SIZE })
 })
 
 test('leave and rejoin: the joiner fills the team that is short, never by join order (10 cycles)', async () => {
@@ -125,7 +148,8 @@ test('leave and rejoin: the joiner fills the team that is short, never by join o
   // to 2v2 after each cycle.
   await joinRoom(c.roomId, rooms, open)
   await joinRoom(c.roomId, rooms, open)
-  expect(teamCounts(rooms[0])).toEqual({ ghost: 2, warden: 2 })
+  expect(teamCounts(godView(rooms))).toEqual({ ghost: 2, warden: 2 })
+  expect(teamCountsOf(rooms)).toEqual({ ghost: 2, warden: 2 })
   const leavePatterns: Team[][] = [
     ['ghost'],
     ['warden'],
@@ -140,17 +164,18 @@ test('leave and rejoin: the joiner fills the team that is short, never by join o
   ]
   for (const [cycle, pattern] of leavePatterns.entries()) {
     for (const team of pattern) {
-      const viewer = rooms[0]
-      const leaver = [...rooms].reverse().find((r) => pos(viewer, r.sessionId).team === team)
+      const leaver = [...rooms].reverse().find((r) => teamOf(r) === team)
       if (!leaver) throw new Error(`cycle ${cycle + 1}: no ${team} left to remove`)
       await leaveRoom(leaver, rooms)
     }
     while (rooms.length < 4) {
-      const want = expectedTeam(teamCounts(rooms[0]))
+      const want = expectedTeam(teamCountsOf(rooms))
       const r = await joinRoom(rooms[0].roomId, rooms, open)
       expectFreshSpawn(rooms, r.sessionId, want, `cycle ${cycle + 1} joiner`)
     }
-    for (const v of rooms) expect(teamCounts(v), `after cycle ${cycle + 1}`).toEqual({ ghost: 2, warden: 2 })
+    // Every Ghost client sees all four; every client knows its own team, so the clients are 2v2.
+    for (const v of rooms.filter((x) => teamOf(x) === 'ghost')) expect(teamCounts(v), `after cycle ${cycle + 1}`).toEqual({ ghost: 2, warden: 2 })
+    expect(teamCountsOf(rooms), `after cycle ${cycle + 1}, by each client's own team`).toEqual({ ghost: 2, warden: 2 })
   }
 })
 
@@ -170,8 +195,10 @@ test('per-team step: a ghost and a warden each move TEAM_SPEED[team] / MOVE_RATE
   const [g, w] = await joinInOrder(2, open)
   const steps: Partial<Record<Team, number>> = {}
   // Both spawn areas have more than one step of open space north of them.
+  // Each mover is watched by a client that is always sent it: the Ghost by
+  // itself (a Warden might not be sent it), the Warden by the Ghost.
   for (const [mover, viewer] of [
-    [g, w],
+    [g, g],
     [w, g],
   ] as const) {
     const p0 = pos(viewer, mover.sessionId)
@@ -189,11 +216,12 @@ test('per-team step: a ghost and a warden each move TEAM_SPEED[team] / MOVE_RATE
 
 test('camera-relative moves follow #18 formula, yaw wraps into -pi..pi, and a yaw-only move turns without moving', async () => {
   test.setTimeout(60_000)
-  const [gRoom, wRoom] = await joinInOrder(2, open)
+  // A second Ghost watches: a Ghost is sent every player, a Warden might not be sent the first Ghost.
+  const [gRoom, , obs] = await joinInOrder(3, open)
   const g = new Walker(gRoom, 'ghost')
   await g.walkTo(GHOST_YARD, 'both')
   const step = g.stepSize
-  const seenByWarden = () => pos(wRoom, gRoom.sessionId)
+  const seenByObserver = () => pos(obs, gRoom.sessionId)
 
   const cases: { msg: { dx: number; dz: number; yaw: number }; what: string; want: Vec }[] = [
     { msg: { dx: 0, dz: 1, yaw: Math.PI / 2 }, what: 'yaw pi/2, forward is +x', want: { x: step, z: 0 } },
@@ -217,9 +245,9 @@ test('camera-relative moves follow #18 formula, yaw wraps into -pi..pi, and a ya
     expect(Math.abs(d.x - c.want.x), `${c.what}: dx ${d.x}, expected ${c.want.x}`).toBeLessThan(EPS)
     expect(Math.abs(d.z - c.want.z), `${c.what}: dz ${d.z}, expected ${c.want.z}`).toBeLessThan(EPS)
     expect(angleDiff(r.at.yaw, c.msg.yaw), `${c.what}: yaw ${r.at.yaw} stored`).toBeLessThan(EPS)
-    // The warden sees the same position and yaw.
-    await waitForState(wRoom, `warden sees the ghost after "${c.what}"`, () => {
-      const p = seenByWarden()
+    // The observer sees the same position and yaw.
+    await waitForState(obs, `observer sees the ghost after "${c.what}"`, () => {
+      const p = seenByObserver()
       return Math.abs(p.x - r.at.x) < EPS && Math.abs(p.z - r.at.z) < EPS && Math.abs(p.yaw - r.at.yaw) < EPS
     })
   }
@@ -231,8 +259,8 @@ test('camera-relative moves follow #18 formula, yaw wraps into -pi..pi, and a ya
   expect(turn.moved, 'the yaw-only move did not move').toBe(false)
   expect(Math.abs(turn.at.yaw - 1.234)).toBeLessThan(EPS)
   expect(Math.abs(turn.at.x - p0.x) + Math.abs(turn.at.z - p0.z)).toBeLessThan(EPS)
-  await waitForState(wRoom, 'warden sees the ghost turn to 1.234', () => Math.abs(seenByWarden().yaw - 1.234) < EPS)
-  expect(Math.abs(seenByWarden().x - p0.x) + Math.abs(seenByWarden().z - p0.z)).toBeLessThan(EPS)
+  await waitForState(obs, 'observer sees the ghost turn to 1.234', () => Math.abs(seenByObserver().yaw - 1.234) < EPS)
+  expect(Math.abs(seenByObserver().x - p0.x) + Math.abs(seenByObserver().z - p0.z)).toBeLessThan(EPS)
 
   // Out-of-range yaws are stored wrapped into -pi..pi. Each turn starts from
   // yaw 0, so its change is always visible.
@@ -251,14 +279,15 @@ test('camera-relative moves follow #18 formula, yaw wraps into -pi..pi, and a ya
     const r = await g.send({ dx: 0, dz: 0, yaw })
     expect(ok(r.at.yaw), `yaw ${yaw} is stored as ${r.at.yaw}, expected ${text}`).toBe(true)
     expect(Math.abs(r.at.x - start.x) + Math.abs(r.at.z - start.z), `turning to ${yaw} did not move`).toBeLessThan(EPS)
-    await waitForState(wRoom, `warden sees yaw ${yaw} wrapped`, () => Math.abs(seenByWarden().yaw - r.at.yaw) < EPS)
+    await waitForState(obs, `observer sees yaw ${yaw} wrapped`, () => Math.abs(seenByObserver().yaw - r.at.yaw) < EPS)
   }
   expect(g.violations).toEqual([])
 })
 
 test('forged yaws (non-number, non-finite) are ignored whole and spend no budget; huge input with any yaw moves at most one step', async () => {
   test.setTimeout(60_000)
-  const [gRoom, wRoom] = await joinInOrder(2, open)
+  // A second Ghost watches: a Ghost is sent every player, a Warden might not be sent the first Ghost.
+  const [gRoom, , obs] = await joinInOrder(3, open)
   let left: number | undefined
   gRoom.onLeave((code) => (left = code))
   const g = new Walker(gRoom, 'ghost')
@@ -281,8 +310,8 @@ test('forged yaws (non-number, non-finite) are ignored whole and spend no budget
   expect(Math.abs(d.x - step), `x moved ${d.x}, expected one step at yaw 0`).toBeLessThan(EPS)
   expect(Math.abs(d.z), `z moved ${d.z}: a forged-yaw move was applied`).toBeLessThan(EPS)
   expect(Math.abs(r.at.yaw), `yaw ${r.at.yaw} unchanged`).toBeLessThan(EPS)
-  await waitForState(wRoom, 'warden sees the sentinel', () => Math.abs(pos(wRoom, gRoom.sessionId).x - r.at.x) < EPS)
-  expect(Math.abs(pos(wRoom, gRoom.sessionId).yaw)).toBeLessThan(EPS)
+  await waitForState(obs, 'observer sees the sentinel', () => Math.abs(pos(obs, gRoom.sessionId).x - r.at.x) < EPS)
+  expect(Math.abs(pos(obs, gRoom.sessionId).yaw)).toBeLessThan(EPS)
   expect(gRoom.connection.isOpen).toBe(true)
   expect(left).toBeUndefined()
 

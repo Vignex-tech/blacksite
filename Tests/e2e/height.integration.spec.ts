@@ -194,13 +194,14 @@ function expectEveryAnchorProbed(tour: Probe[], who: string) {
  */
 async function runTour(team: Team, probes: Probe[]) {
   expectEveryAnchorProbed(probes, team)
-  const [g, wd] = await joinInOrder(2, open)
+  // The third client is a second Ghost, the observer: a Ghost is sent every player, a Warden might not be sent a Ghost (#45).
+  const [g, wd, obs] = await joinInOrder(3, open)
   const ghost = new Walker(g, 'ghost', { ground: false })
   const warden = new Walker(wd, 'warden', { ground: false })
   const [w, watcher] = team === 'ghost' ? [ghost, warden] : [warden, ghost]
   expect(w.state.team).toBe(team)
   const seen = track(w.room, w.room.sessionId)
-  const seenByOther = track(watcher.room, w.room.sessionId)
+  const seenByOther = track(obs, w.room.sessionId)
   const idle = track(watcher.room, watcher.room.sessionId)
 
   const log: string[] = []
@@ -345,11 +346,12 @@ test('stairs: a Warden climbs to UPPER_LEVEL_Y in ground mode and walks off the 
 })
 
 test('jumps: a Ghost jump is seen falling, peaks at most at the JUMP_SPEED apex and lands; a mid-air jump and a Warden jump change nothing', async () => {
-  const [g, wd] = await joinInOrder(2, open)
+  // obs is a second Ghost: it is sent every player, so it can watch the first Ghost (a Warden might not be sent it, #45).
+  const [g, wd, obs] = await joinInOrder(3, open)
   const ghost = new Walker(g, 'ghost', { ground: false })
   const warden = new Walker(wd, 'warden', { ground: false })
   const gSeen = track(g, g.sessionId)
-  const gSeenByW = track(wd, g.sessionId)
+  const gSeenByW = track(obs, g.sessionId)
   const wSeen = track(wd, wd.sessionId)
   const g0 = ghost.state
   const w0 = warden.state

@@ -8,7 +8,7 @@ import { GRAYBOX_MAP, PLAYER_HEIGHT, UPPER_LEVEL_Y, type ClimbAnchor, type Ledge
 import type { BlacksiteSnapshot } from '../../shared/testhook.js'
 import { MANTLE_DISTANCE } from '../../server/build/rooms/MyRoom.js'
 import { feetY, modeOf, rectsOverlap, playerRect, type Point } from './support/geometry.js'
-import { Walker, waitForState, endpoint, type GameRoom } from './support/sdk.js'
+import { Walker, waitForState, endpoint, leaveQuietly, type GameRoom } from './support/sdk.js'
 import { track } from './support/track.js'
 import { closeTabs, joined, lockPointer, openTab, snap, startSampler, turnTo, VIEWPORT, WAIT_MS, type Sample, type Tab } from './support/tabs.js'
 
@@ -31,10 +31,18 @@ import { closeTabs, joined, lockPointer, openTab, snap, startSampler, turnTo, VI
 // SDK clients see all four players. The SDK clients leave before the tabs
 // close, so no later spec sees them.
 //
+// Since #45 this holds with the M5 visibility filter (#46): the Warden tab B is
+// not sent the SDK Ghost unless it is near or in line of sight, so the Ghost's
+// climb is followed by the Ghost tab A (which is sent every player) and the SDK
+// Warden's climb of the stairs by both tabs (a Warden is always sent its
+// teammates). Tab B is checked against the server for what it holds.
+//
 // Screenshots (for humans, no pixel comparison; CI uploads Tests/Reports/ as
-// "graybox-map-screenshot"): the Warden tab's first-person view of the Ghost
-// hanging under the cyan ledge bar, and of the SDK Warden on the upper level
-// above the stairs.
+// "graybox-map-screenshot"): the Ghost tab's third-person view of the Ghost
+// hanging under the cyan ledge bar (it used to be the Warden tab's first-person
+// view; with the filter the Warden would not be sent the Ghost), and the
+// Warden tab's first-person view of the SDK Warden on the upper level above
+// the stairs.
 
 const REPORTS = join(dirname(fileURLToPath(import.meta.url)), '..', 'Reports')
 const HANGING_SHOT = join(REPORTS, 'graybox-upper-level-hanging.png')
@@ -106,14 +114,18 @@ async function tabSees(tab: Tab, id: string, want: Expected, what: string): Prom
 
 /**
  * Fails unless every player in the tab's snapshot has exactly the team, x, y,
- * z and mode the server synced (as the SDK client `room` received them).
- * Polls until it holds (the tab may be a patch behind), then asserts.
+ * z and mode the server synced (as the SDK client `room` received them; pass a
+ * Ghost client, which is sent every player), and the tab holds every id in
+ * `required`. A Ghost tab holds all of the server's players (`all`); a Warden
+ * tab may not hold the Ghosts it can't see (#45). Polls until it holds (the
+ * tab may be a patch behind), then asserts.
  */
-async function expectTabMatchesServer(tab: Tab, room: GameRoom): Promise<BlacksiteSnapshot> {
+async function expectTabMatchesServer(tab: Tab, room: GameRoom, required: string[], all = false): Promise<BlacksiteSnapshot> {
   const diff = (s: BlacksiteSnapshot): string[] => {
     const out: string[] = []
     const server = room.state.players
-    if (s.players.length !== server.size) out.push(`${s.players.length} players, server has ${server.size}`)
+    if (all && s.players.length !== server.size) out.push(`${s.players.length} players, server has ${server.size}`)
+    for (const id of required) if (!s.players.some((p) => p.id === id)) out.push(`${id} missing from the tab`)
     for (const p of s.players) {
       const q = server.get(p.id) as unknown as Record<string, unknown> | undefined
       if (!q) {
@@ -201,7 +213,8 @@ test('both tabs see an SDK Ghost climb, hang and mantle and an SDK Warden take t
     await waitForState(g, 'the SDK ghost sees itself', (s) => s.players.size === 1)
     const wd = (await new Client(endpoint).joinOrCreate(ROOM_NAME)) as GameRoom
     rooms.push(wd)
-    await waitForState(wd, 'the SDK warden sees the ghost and itself', (s) => s.players.size === 2 && s.players.has(g.sessionId))
+    await waitForState(g, 'the SDK ghost sees the warden and itself', (s) => s.players.size === 2 && s.players.has(wd.sessionId))
+    await waitForState(wd, 'the SDK warden sees itself', (s) => s.players.has(wd.sessionId))
     const ghost = new Walker(g, 'sdk ghost', { ground: false })
     const warden = new Walker(wd, 'sdk warden', { ground: false })
     expect(ghost.state.team).toBe('ghost')
@@ -223,24 +236,27 @@ test('both tabs see an SDK Ghost climb, hang and mantle and an SDK Warden take t
     ])
     toStarts.catch(() => {}) // awaited below; this only stops an early failure being reported as unhandled
     a = await openTab(browser, 'tab A')
-    const sa = await joined(a, 3)
+    const sa = await joined(a, { ghosts: 2, wardens: 1 })
     b = await openTab(browser, 'tab B')
-    const sb = await joined(b, 4)
+    const sb = await joined(b, { ghosts: 2, wardens: 2 })
     const tabA = a
     const tabB = b
     const idA = sa.sessionId!
     const idB = sb.sessionId!
     expect(sa.localTeam).toBe('ghost')
     expect(sb.localTeam).toBe('warden')
-    await joined(a, 4)
+    await joined(a, { ghosts: 2, wardens: 2 })
     // Both tabs rendered every floor, ramp and anchor of the shared map.
     for (const s of [sa, sb]) expect(s.map, `${s.sessionId}'s map counts`).toEqual(EXPECTED_MAP)
     expect(EXPECTED_MAP).toEqual({ id: 'graybox-1', renderedSolids: 16, renderedFloors: 4, renderedRamps: 1, renderedAnchors: 6 })
-    const bothTabsSee = (id: string, want: Expected, what: string) => Promise.all([tabSees(tabA, id, want, what), tabSees(tabB, id, want, what)])
+    // The Ghost tab is sent the SDK Ghost; the SDK Warden is a teammate of tab B, so both tabs are sent it.
+    const tabsSeeGhost = (want: Expected, what: string) => tabSees(tabA, g.sessionId, want, what)
+    const bothTabsSeeWarden = (want: Expected, what: string) => Promise.all([tabSees(tabA, wd.sessionId, want, what), tabSees(tabB, wd.sessionId, want, what)])
     const stopA = await startSampler(a.page, 40)
     const stopB = await startSampler(b.page, 40)
     await toStarts
-    for (const r of [g, wd]) await waitForState(r, `${r.sessionId} sees both tabs`, (s) => s.players.size === 4 && [idA, idB].every((id) => s.players.has(id)))
+    await waitForState(g, 'the SDK ghost sees both tabs', (s) => s.players.size === 4 && [idA, idB].every((id) => s.players.has(id)))
+    await waitForState(wd, 'the SDK warden sees tab B', (s) => s.players.has(idB))
     for (const r of [g, wd]) {
       const p = own(r)
       // y within EPS: walk residue (ARRIVE) can leave the warden's box a hair over the stairs' low edge.
@@ -252,12 +268,12 @@ test('both tabs see an SDK Ghost climb, hang and mantle and an SDK Warden take t
     const ghostUp = async () => {
       g.send(ACTION_MESSAGE, { action: 'climb' })
       await waitMode(g, 'climbing', 'the ghost grabs climb-east')
-      // Each climb step is held until both tabs show the ghost at that y, so
-      // the tabs are seen to follow the whole climb, not only its ends.
-      await bothTabsSee(g.sessionId, own(g), 'the SDK ghost on climb-east at the bottom')
+      // Each climb step is held until tab A shows the ghost at that y, so
+      // the tab is seen to follow the whole climb, not only its ends.
+      await tabsSeeGhost(own(g), 'the SDK ghost on climb-east at the bottom')
       for (let i = 0; i < 40 && own(g).mode === 'climbing'; i++) {
         const r = await ghost.attachedStep(0, 1)
-        if (r.moved) await bothTabsSee(g.sessionId, own(g), `the SDK ghost climbing, step ${i + 1}`)
+        if (r.moved) await tabsSeeGhost(own(g), `the SDK ghost climbing, step ${i + 1}`)
       }
       expect(own(g)).toEqual({ x: CLIMB_EAST.x, y: expect.closeTo(HANG_Y, 4), z: CLIMB_EAST.z, mode: 'hanging' })
     }
@@ -268,7 +284,7 @@ test('both tabs see an SDK Ghost climb, hang and mantle and an SDK Warden take t
         await warden.step(0, 1)
         if (!held && own(wd).y > UPPER_LEVEL_Y / 2) {
           held = true
-          await bothTabsSee(wd.sessionId, own(wd), `the SDK warden half way up the stairs`)
+          await bothTabsSeeWarden(own(wd), `the SDK warden half way up the stairs`)
         }
       }
       expect(held, 'the warden passed half way up').toBe(true)
@@ -278,19 +294,20 @@ test('both tabs see an SDK Ghost climb, hang and mantle and an SDK Warden take t
     }
     await Promise.all([ghostUp(), wardenUp()])
 
-    // Both tabs see the hanger at the ledge and the Warden on the upper level.
+    // Tab A sees the hanger at the ledge; both tabs see the Warden on the upper level.
     const hang = { x: CLIMB_EAST.x, y: HANG_Y, z: CLIMB_EAST.z, mode: 'hanging' }
     const landing = own(wd)
-    for (const tab of [tabA, tabB]) {
-      await tabSees(tab, g.sessionId, hang, `the SDK ghost hanging from ${LEDGE_EAST.id} at feet ${HANG_Y}`)
-      await tabSees(tab, wd.sessionId, landing, `the SDK warden on the upper level at y ${UPPER_LEVEL_Y}`)
-      await expectTabMatchesServer(tab, wd)
-    }
+    await tabsSeeGhost(hang, `the SDK ghost hanging from ${LEDGE_EAST.id} at feet ${HANG_Y}`)
+    await bothTabsSeeWarden(landing, `the SDK warden on the upper level at y ${UPPER_LEVEL_Y}`)
+    // Tab A (a Ghost) holds all four players, tab B (a Warden) at least itself and the SDK Warden; both match the server.
+    await expectTabMatchesServer(tabA, g, [idA, idB, g.sessionId, wd.sessionId], true)
+    await expectTabMatchesServer(tabB, g, [idB, wd.sessionId])
 
-    // For humans: the Warden tab looks at the hanger, then at the Warden at the top of the stairs.
+    // For humans: the Ghost tab looks at the hanger, then the Warden tab at the Warden at the top of the stairs.
     mkdirSync(REPORTS, { recursive: true })
+    await lockPointer(tabA)
     await lockPointer(tabB)
-    await shoot(tabB, { x: CLIMB_EAST.x, z: CLIMB_EAST.z }, HANGING_SHOT, 'upper-level-hanging', 0)
+    await shoot(tabA, { x: CLIMB_EAST.x, z: CLIMB_EAST.z }, HANGING_SHOT, 'upper-level-hanging', 0)
     await shoot(tabB, { x: landing.x, z: landing.z }, STAIRS_SHOT, 'upper-level-stairs', -80)
 
     // Mantle: both tabs see the Ghost standing on the east platform at UPPER_LEVEL_Y.
@@ -298,11 +315,10 @@ test('both tabs see an SDK Ghost climb, hang and mantle and an SDK Warden take t
     await waitMode(g, 'ground', 'the ghost mantles')
     const top = { x: MANTLE_AT.x, y: UPPER_LEVEL_Y, z: MANTLE_AT.z, mode: 'ground' }
     expect(Math.abs(own(g).x - top.x) + Math.abs(own(g).y - top.y) + Math.abs(own(g).z - top.z), `mantled to ${JSON.stringify(own(g))}`).toBeLessThan(EPS)
-    for (const tab of [tabA, tabB]) {
-      await tabSees(tab, g.sessionId, top, `the SDK ghost standing on the east platform`)
-      // Every player (the two tabs' own, the SDK ghost and warden) matches the server in both tabs.
-      for (const room of [g, wd]) await expectTabMatchesServer(tab, room)
-    }
+    await tabSees(tabA, g.sessionId, top, `the SDK ghost standing on the east platform`)
+    // Every player a tab holds (the two tabs' own, the SDK ghost and warden) matches the server.
+    await expectTabMatchesServer(tabA, g, [idA, idB, g.sessionId, wd.sessionId], true)
+    await expectTabMatchesServer(tabB, g, [idB, wd.sessionId])
 
     const samples = { 'tab A': await stopA(), 'tab B': await stopB() }
     expect(ghost.violations, 'the ghost overlap watch').toEqual([])
@@ -312,15 +328,16 @@ test('both tabs see an SDK Ghost climb, hang and mantle and an SDK Warden take t
     expect(serverGhostModes, 'the server: grab, climb, hang, mantle').toEqual(['ground', 'climbing', 'hanging', 'ground'])
 
     // The tabs' records, checked once the SDK clients are gone (see seenBy).
-    for (const r of rooms.splice(0)) await r.leave().catch(() => {})
+    for (const r of rooms.splice(0)) await leaveQuietly(r)
     for (const [name, s] of Object.entries(samples)) {
       const bad: string[] = []
       const at = (v: { x: number; y: number; z: number; mode: string }) => `${v.mode} at ${v.x},${v.y},${v.z}`
-      // The SDK ghost: ground, climbing on the anchor, hanging at the ledge, ground on the platform.
-      const gv = seenBy(s, g.sessionId, bad)
-      expect(modeSequence(gv), `${name} saw the ghost grab, climb, hang and mantle: ${gv.map(at).join('; ')}`).toEqual(['ground', 'climbing', 'hanging', 'ground'])
+      // The SDK ghost, in the Ghost tab only (the Warden tab is not required to be sent a Ghost):
+      // ground, climbing on the anchor, hanging at the ledge, ground on the platform.
+      const gv = name === 'tab A' ? seenBy(s, g.sessionId, bad) : []
+      if (name === 'tab A') expect(modeSequence(gv), `${name} saw the ghost grab, climb, hang and mantle: ${gv.map(at).join('; ')}`).toEqual(['ground', 'climbing', 'hanging', 'ground'])
       const climbing = gv.filter((v) => v.mode === 'climbing')
-      expect(climbing.some((v) => v.y > STEP_HEIGHT && v.y < HANG_Y - STEP_HEIGHT), `${name} saw the ghost part way up the climb`).toBe(true)
+      if (name === 'tab A') expect(climbing.some((v) => v.y > STEP_HEIGHT && v.y < HANG_Y - STEP_HEIGHT), `${name} saw the ghost part way up the climb`).toBe(true)
       climbing.forEach((v, i) => {
         if (Math.abs(v.x - CLIMB_EAST.x) + Math.abs(v.z - CLIMB_EAST.z) > EPS) bad.push(`ghost ${at(v)}: climbing off the anchor`)
         if (v.y < CLIMB_EAST.minY - EPS || v.y > CLIMB_EAST.maxY + EPS) bad.push(`ghost ${at(v)}: climbing outside minY..maxY`)
@@ -353,7 +370,7 @@ test('both tabs see an SDK Ghost climb, hang and mantle and an SDK Warden take t
     expect(tabA.errors).toEqual([])
     expect(tabB.errors).toEqual([])
   } finally {
-    for (const r of rooms) await r.leave().catch(() => {})
+    for (const r of rooms) await leaveQuietly(r)
     await closeTabs(a, b)
   }
 })

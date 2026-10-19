@@ -13,7 +13,8 @@ import {
 } from '../../shared/protocol.js'
 import { PLAYER_HEIGHT } from '../../shared/map.js'
 import { feetY } from './support/geometry.js'
-import { Walker, joinInOrder, waitForState, type GameRoom } from './support/sdk.js'
+import { Walker, joinInOrder, leaveQuietly, waitForState, whenVisible, type GameRoom } from './support/sdk.js'
+import { visibilityOf } from './support/visibility.js'
 import { collectEvents, vitalsOf } from './support/vitals.js'
 
 // M5 hitscan fire (#41, verified in #42) through real @colyseus/sdk clients:
@@ -25,6 +26,12 @@ import { collectEvents, vitalsOf } from './support/vitals.js'
 // (server/test/ballistics.test.ts); this spec only adds what needs a real
 // server and real clients. Expected numbers come from shared/ (WEAPONS,
 // MAX_HEALTH, EYE_HEIGHT), not from server rule code.
+//
+// Since #45 these specs hold with the M5 visibility filter (#46): a Warden
+// client is not sent a Ghost it can't see. Aim angles are computed from a
+// Ghost client's state (it is sent every player; `aimAt` takes that viewer),
+// and the Warden client reads the Ghost only in the test that puts them in
+// line of sight (`whenVisible`).
 //
 // Per Docs/handoff.md: problems are collected in arrays and asserted once,
 // after the SDK clients have left; spawns are random, so a test reads the
@@ -55,7 +62,12 @@ function fire(r: GameRoom, payload: unknown) {
   r.send(FIRE_MESSAGE, payload)
 }
 
-/** Yaw and pitch from `shooter`'s eye to the middle of `target`'s box, as `viewer` sees them (plus an optional drop in u). */
+/**
+ * Yaw and pitch from `shooter`'s eye to the middle of `target`'s box, as `viewer`
+ * sees them (plus an optional drop in u). `viewer` must be a Ghost client (or
+ * the shooter's own client for a Ghost target): a Warden client is not sent a
+ * Ghost it can't see.
+ */
 function aimAt(viewer: GameRoom, shooterId: string, targetId: string, targetY?: number) {
   const s = viewer.state.players.get(shooterId) as unknown as { x: number; y: number; z: number }
   const t = viewer.state.players.get(targetId) as unknown as { x: number; y: number; z: number }
@@ -102,26 +114,26 @@ test('a shot through a wall never hits, and stops at the wall', async () => {
   await Promise.all([gw.walkTo({ x: 3.9, z: gw.pos.z }), ww.walkTo({ x: 2.9, z: ww.pos.z })])
   const volleys = 3
   for (let i = 0; i < volleys; i++) {
-    fire(w, aimAt(w, wid, gid))
+    fire(w, aimAt(g, wid, gid))
     await sleep(COOL_MS)
   }
   await waitValue(w, 'warden spent three rounds', () => ammo(w, wid), WARDEN.magazine - volleys)
   await waitForState(g, 'ghost sees three shots', () => ammo(g, wid) === WARDEN.magazine - volleys)
   await sleep(100)
   const result = {
-    ghostHealth: [health(g, gid), health(w, gid)],
+    ghostHealth: [health(g, gid)], // the Warden behind the wall is not sent the Ghost at all
     shots: shots.events.slice(),
     hits: hits.events.slice(),
     ghostX: gw.state.x,
     wardenX: ww.state.x,
     violations: [...gw.violations, ...ww.violations],
   }
-  await Promise.all(open.splice(0).map((r) => r.leave().catch(() => {})))
+  await Promise.all(open.splice(0).map((r) => leaveQuietly(r)))
 
   expect(result.violations).toEqual([])
   expect(result.ghostX, 'ghost is east of the doorway').toBeGreaterThan(3)
   expect(result.wardenX, 'warden is east of the doorway').toBeGreaterThan(2)
-  expect(result.ghostHealth).toEqual([MAX_HEALTH.ghost, MAX_HEALTH.ghost])
+  expect(result.ghostHealth).toEqual([MAX_HEALTH.ghost])
   expect(result.hits, 'no hit event for a wall').toEqual([])
   expect(result.shots).toHaveLength(volleys)
   for (const s of result.shots) {
@@ -156,9 +168,12 @@ test('line of sight: hits, damage, ammo, events, height, forged fields and caden
     })(),
   ])
   const wardenY = feetY(ww.state)
+  // They are in line of sight (the shots below prove it): the Warden client is sent the Ghost.
+  expect(visibilityOf(ww.state, gw.state), 'the Warden on the stairs does not lose the Ghost').not.toBe('hidden')
+  await whenVisible(w, gid)
 
   // 1. Warden rifle hit on the Ghost (shooting down at the Ghost).
-  fire(w, aimAt(w, wid, gid))
+  fire(w, aimAt(g, wid, gid))
   await waitValue(g, 'ghost loses rifle damage', () => health(g, gid), MAX_HEALTH.ghost - WARDEN.damage)
   await waitValue(w, 'warden ammo 29', () => ammo(w, wid), WARDEN.magazine - 1)
   await sleep(COOL_MS)
@@ -177,7 +192,7 @@ test('line of sight: hits, damage, ammo, events, height, forged fields and caden
   const afterLowAim = health(w, wid)
 
   // 4. Forged fields: damage 999 and a target are ignored; the hit does rifle damage.
-  fire(w, { ...aimAt(w, wid, gid), damage: 999, target: wid, hit: true, health: 0 })
+  fire(w, { ...aimAt(g, wid, gid), damage: 999, target: wid, hit: true, health: 0 })
   await waitValue(g, 'ghost loses exactly rifle damage', () => health(g, gid), MAX_HEALTH.ghost - 2 * WARDEN.damage)
   await sleep(COOL_MS)
   // ...and a forged target does not turn a shot into a hit.
@@ -217,7 +232,7 @@ test('line of sight: hits, damage, ammo, events, height, forged fields and caden
     gAmmoSeenByW: ammo(w, gid),
     wAmmoSeenByG: ammo(g, wid),
   }
-  await Promise.all(open.splice(0).map((r) => r.leave().catch(() => {})))
+  await Promise.all(open.splice(0).map((r) => leaveQuietly(r)))
 
   expect(result.violations).toEqual([])
   expect(result.wardenY, 'the Warden is well up the stairs').toBeGreaterThan(1.2)
@@ -296,7 +311,7 @@ test('a forged rapid-fire Warden is capped by the cooldown; an empty magazine ca
   await sleep(150)
   const finalAmmo = ammo(w, wid)
   const shotCount = heard.events.filter((s) => s.shooter === wid).length
-  await Promise.all(open.splice(0).map((r) => r.leave().catch(() => {})))
+  await Promise.all(open.splice(0).map((r) => leaveQuietly(r)))
 
   const cap = Math.floor((elapsed + 2 * STEP_MS) / WARDEN.intervalMs) + 1
   expect(spentAt2s, `spent ${spentAt2s} rounds in ${elapsed} ms`).toBeLessThanOrEqual(cap)
@@ -353,7 +368,7 @@ test('invalid fire payloads change nothing and spend no token', async () => {
     hits: hits.events.length,
     open: w.connection.isOpen && g.connection.isOpen,
   }
-  await Promise.all(open.splice(0).map((r) => r.leave().catch(() => {})))
+  await Promise.all(open.splice(0).map((r) => leaveQuietly(r)))
 
   expect(result.afterInvalid, 'only the one valid shot spent a round').toBe(WARDEN.magazine - 1)
   expect([WARDEN.magazine - 2, WARDEN.magazine - 1]).toContain(result.afterHuge)
@@ -371,7 +386,7 @@ test('shots pass through teammates, for both teams', async () => {
   const shots = collectEvents<ShotEvent>(g1, SHOT_EVENT)
   const hitsW = collectEvents<HitEvent>(w1, HIT_EVENT)
   const hitsG = collectEvents<HitEvent>(g1, HIT_EVENT)
-  fire(w1, aimAt(w1, me(w1), me(w2)))
+  fire(w1, aimAt(g1, me(w1), me(w2)))
   fire(g1, aimAt(g1, me(g1), me(g2)))
   await waitValue(w1, 'warden spent a round', () => ammo(w1, me(w1)), WARDEN.magazine - 1)
   await waitValue(g1, 'ghost spent a round', () => ammo(g1, me(g1)), GHOST.magazine - 1)
@@ -383,7 +398,7 @@ test('shots pass through teammates, for both teams', async () => {
     hitsG: hitsG.events.length,
     shots: shots.events.map((s) => [s.team, s.hit]),
   }
-  await Promise.all(open.splice(0).map((r) => r.leave().catch(() => {})))
+  await Promise.all(open.splice(0).map((r) => leaveQuietly(r)))
 
   expect(result.w2).toBe(MAX_HEALTH.warden)
   expect(result.g2).toBe(MAX_HEALTH.ghost)

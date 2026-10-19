@@ -22,10 +22,14 @@ import {
   EPS,
   Walker,
   expectFacingPlusZ,
+  godView,
   joinInOrder,
+  leaveQuietly,
   pos,
+  seenPos,
   sizeIs,
   waitForState,
+  whenGone,
   type GameRoom,
 } from './support/sdk.js'
 
@@ -34,6 +38,12 @@ import {
 // browser project (see playwright.config.ts), so no browser page can
 // joinOrCreate into these rooms and change the player counts.
 // Teams, per-team speed and yaw are covered in teams.integration.spec.ts.
+//
+// Since #45 these specs hold with the M5 visibility filter (#46): a Warden
+// client is sent a Ghost only when it is near or in line of sight, so a Ghost
+// is never read from the Warden client. Other players are read from a Ghost
+// client (support/sdk.ts godView), which is sent everyone, or from the player's
+// own client.
 
 /** True if `to - from` equals `d` on both axes (within EPS). */
 function movedBy(from: Vec, to: Vec, d: Vec): boolean {
@@ -45,13 +55,19 @@ test.afterEach(async () => {
   await Promise.all(open.splice(0).map((r) => (r.connection.isOpen ? r.leave().catch(() => {}) : undefined)))
 })
 
-/** A creates a fresh room, B joins it by id; both see 2 players. */
+/** A (ghost) creates a fresh room, B (warden) joins it by id. Each sees what it must (A sees both). */
 async function joinPair() {
   const [a, b] = await joinInOrder(2, open)
   return { a, b }
 }
 
-test('two clients join the same room, each sees 2 players keyed by sessionId, spawned inside the bounds', async () => {
+/** A (ghost), B (warden) and C (a second ghost, the observer: it is sent every player, so it can watch A). */
+async function joinTrio() {
+  const [a, b, c] = await joinInOrder(3, open)
+  return { a, b, c }
+}
+
+test('two clients join the same room, the Ghost sees 2 players keyed by sessionId, spawned inside the bounds', async () => {
   const { a, b } = await joinPair()
   expect(a.roomId).toBe(b.roomId)
   expect(a.sessionId).not.toBe(b.sessionId)
@@ -63,9 +79,13 @@ test('two clients join the same room, each sees 2 players keyed by sessionId, sp
     [a.sessionId, 'ghost'],
     [b.sessionId, 'warden'],
   ]
+  expect(a.state.players.size, 'the Ghost client is sent both players').toBe(2)
+  expect(b.state.players.has(b.sessionId), 'the Warden client is sent itself').toBe(true)
   for (const room of [a, b]) {
     for (const [id, area] of expected) {
-      const p = pos(room, id)
+      // A Warden client may not be sent the Ghost (the filter); everything it is sent is checked.
+      const p = seenPos(room, id, area)
+      if (!p) continue
       expect(inRect(p, GRAYBOX_MAP.spawnAreas[area]), `${id} at ${p.x},${p.z} is in the ${area} area`).toBe(true)
       expect(p.team, `${id}'s team`).toBe(area)
       expectFacingPlusZ(p, id)
@@ -75,41 +95,47 @@ test('two clients join the same room, each sees 2 players keyed by sessionId, sp
       expect(Math.abs(p.z)).toBeLessThanOrEqual(BOUND + EPS)
     }
   }
-  // Both clients agree on both players.
-  for (const id of [a.sessionId, b.sessionId]) {
-    expect(pos(a, id).x).toBeCloseTo(pos(b, id).x, 4)
-    expect(pos(a, id).z).toBeCloseTo(pos(b, id).z, 4)
-    expect(pos(a, id).team).toBe(pos(b, id).team)
+  // Both clients agree on every player both of them are sent (always the Warden; the Ghost only if the Warden sees it).
+  for (const [id, area] of expected) {
+    const pa = seenPos(a, id, area)!
+    const pb = seenPos(b, id, area)
+    if (!pb) continue
+    expect(pa.x).toBeCloseTo(pb.x, 4)
+    expect(pa.z).toBeCloseTo(pb.z, 4)
+    expect(pa.team).toBe(pb.team)
   }
 })
 
-test("A's move { dx: 1, dz: 0 } moves A one step to its right as seen by B, and not B", async () => {
-  const { a, b } = await joinPair()
-  const a0 = pos(b, a.sessionId)
-  const b0 = pos(b, b.sessionId)
+test("A's move { dx: 1, dz: 0 } moves A one step to its right as seen by another client, and not B", async () => {
+  // C is a second Ghost: it is sent every player, so it can watch A (B, a Warden, may not be sent A).
+  const { a, b, c } = await joinTrio()
+  const a0 = pos(c, a.sessionId)
+  const b0 = pos(c, b.sessionId)
   expectFacingPlusZ(a0, 'A')
   // One ghost step along A's right (+x at yaw 0).
   const d = worldStep(1, 0, a0.yaw, new Walker(a, 'A').stepSize)
 
   a.send(MOVE_MESSAGE, { dx: 1, dz: 0 })
-  await waitForState(b, 'B sees A move', () => {
-    const p = pos(b, a.sessionId)
+  await waitForState(c, 'C sees A move', () => {
+    const p = pos(c, a.sessionId)
     return Math.abs(p.x - a0.x) > EPS || Math.abs(p.z - a0.z) > EPS
   })
 
-  const a1 = pos(b, a.sessionId)
+  const a1 = pos(c, a.sessionId)
   expect(Math.abs(a1.x - (a0.x + d.x)), `x ${a1.x}, expected ${a0.x + d.x}`).toBeLessThan(EPS)
   expect(Math.abs(a1.z - (a0.z + d.z)), `z ${a1.z}, expected ${a0.z + d.z}`).toBeLessThan(EPS)
-  const b1 = pos(b, b.sessionId)
-  expect(Math.abs(b1.x - b0.x)).toBeLessThan(EPS)
-  expect(Math.abs(b1.z - b0.z)).toBeLessThan(EPS)
+  // B did not move, in its own view and in C's.
+  for (const b1 of [pos(c, b.sessionId), pos(b, b.sessionId)]) {
+    expect(Math.abs(b1.x - b0.x)).toBeLessThan(EPS)
+    expect(Math.abs(b1.z - b0.z)).toBeLessThan(EPS)
+  }
 })
 
 test('malformed and out-of-range moves do not move A or disconnect it', async () => {
-  const { a, b } = await joinPair()
+  const { a, c } = await joinTrio() // C (a Ghost) sees A; a Warden might not
   let aLeft: number | undefined
   a.onLeave((code) => (aLeft = code))
-  const a0 = pos(b, a.sessionId)
+  const a0 = pos(c, a.sessionId)
   const step = new Walker(a, 'A').stepSize
   // The sentinel is a forward move; with yaw 0 that is +z only.
   expectFacingPlusZ(a0, 'A')
@@ -121,16 +147,16 @@ test('malformed and out-of-range moves do not move A or disconnect it', async ()
   // so once B sees it, every malformed message above has been handled too.
   // x must be unchanged and z must have moved by exactly one step.
   a.send(MOVE_MESSAGE, { dx: 0, dz: 1 })
-  await waitForState(b, "B sees A's sentinel z move", () => Math.abs(pos(b, a.sessionId).z - a0.z) > EPS)
+  await waitForState(c, "C sees A's sentinel z move", () => Math.abs(pos(c, a.sessionId).z - a0.z) > EPS)
 
-  let a1 = pos(b, a.sessionId)
+  let a1 = pos(c, a.sessionId)
   expect(movedBy(a0, a1, worldStep(0, 1, 0, step)), `moved ${a1.x - a0.x},${a1.z - a0.z}`).toBe(true)
 
   // Out-of-range input is clamped to -1..1: at most one step per message.
   const a2 = a1
   a.send(MOVE_MESSAGE, { dx: -1000, dz: 0 })
-  await waitForState(b, "B sees A's clamped x move", () => Math.abs(pos(b, a.sessionId).x - a2.x) > EPS)
-  a1 = pos(b, a.sessionId)
+  await waitForState(c, "C sees A's clamped x move", () => Math.abs(pos(c, a.sessionId).x - a2.x) > EPS)
+  a1 = pos(c, a.sessionId)
   expect(movedBy(a2, a1, worldStep(-1, 0, 0, step)), `moved ${a1.x - a2.x},${a1.z - a2.z}`).toBe(true)
   expect(Math.abs(a1.x)).toBeLessThanOrEqual(BOUND)
 
@@ -138,14 +164,20 @@ test('malformed and out-of-range moves do not move A or disconnect it', async ()
   expect(aLeft).toBeUndefined()
 })
 
-test("closing A drops B's player count to 1", async () => {
-  const { a, b } = await joinPair()
+test("closing A removes it from B's and C's players, and C holds exactly B and itself", async () => {
+  const { a, b, c } = await joinTrio()
   const aId = a.sessionId
+  expect(godView([a, b, c]).state.players.has(b.sessionId)).toBe(true)
 
   await a.leave()
-  await waitForState(b, 'B sees 1 player', sizeIs(1))
-  expect(b.state.players.get(aId)).toBeUndefined()
+  // C (a Ghost) held all 3 and now holds B and itself; B (a Warden) holds itself and, if
+  // the filter sends it, C (the Ghost A may or may not have been sent to it).
+  await whenGone(b, aId)
+  await whenGone(c, aId)
+  await waitForState(c, 'C sees 2 players', sizeIs(2))
+  for (const r of [b, c]) expect(r.state.players.get(aId)).toBeUndefined()
   expect(b.state.players.get(b.sessionId)).toBeDefined()
+  expect(c.state.players.get(b.sessionId)).toBeDefined()
 })
 
 // ---------------------------------------------------------------------------
@@ -167,8 +199,10 @@ test('balanced teams, ties to ghost: joiners 1 and 3 spawn in the ghost area, 2 
     const rooms = await joinInOrder(4, open)
     for (const viewer of rooms) {
       rooms.forEach((joiner, i) => {
-        const p = pos(viewer, joiner.sessionId)
         const area = SPAWN_AREA_BY_JOIN[i]
+        // A Warden client may not be sent a Ghost (the filter); a Ghost client is sent all four.
+        const p = seenPos(viewer, joiner.sessionId, area)
+        if (!p) return
         expect(inRect(p, GRAYBOX_MAP.spawnAreas[area]), `joiner ${i + 1} at ${p.x},${p.z} is in the ${area} area`).toBe(
           true,
         )
@@ -178,7 +212,7 @@ test('balanced teams, ties to ghost: joiners 1 and 3 spawn in the ghost area, 2 
         expectFacingPlusZ(p, `joiner ${i + 1}`)
       })
     }
-    await Promise.all(open.splice(0).map((r) => r.leave().catch(() => {})))
+    await Promise.all(open.splice(0).map((r) => leaveQuietly(r)))
   }
 })
 

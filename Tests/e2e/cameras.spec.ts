@@ -5,6 +5,7 @@ import type { BlacksiteSnapshot } from '../../shared/testhook.js'
 import { expectTeamsAndYaws } from './support/hook.js'
 import { angleDiff, stepFor, worldStep } from './support/movement.js'
 import { analyse, expectGroundRoute, expectNeverFasterThanLimit, expectNoOverlap, pathClear, track } from './support/legs.js'
+import { Observer } from './support/observer.js'
 import {
   EPS,
   MODE_FOR_TEAM,
@@ -21,6 +22,7 @@ import {
   openTab,
   snap,
   startSampler,
+  type Sample,
   type Tab,
 } from './support/tabs.js'
 import type { SentMove } from './support/frames.js'
@@ -32,6 +34,12 @@ import type { SentMove } from './support/frames.js'
 // move messages the tab sends (support/frames.ts); turning goes through the
 // real input path: click the canvas for pointer lock, then move the mouse
 // (headless Chromium grants pointer lock, so no workaround is needed).
+//
+// Since #45 this holds with the M5 visibility filter (#46): tab B (a Warden)
+// is not sent the Ghost unless it can see it, so a Ghost's moves are witnessed
+// by an SDK Ghost observer (support/observer.ts, the third joiner), which is
+// sent every player, and the Warden's moves by tab A (a Ghost). A "witness"
+// below is whichever of those watches the player under test.
 //
 // Room: browser pages joinOrCreate the one shared my_room (single worker).
 // Tab A must see itself alone before tab B opens, so A is the first joiner of
@@ -90,21 +98,54 @@ function expectSendRate(count: number, ms: number, who: string, atLeast = true) 
   if (atLeast) expect(count, `${who}: about one move per 50 ms tick (${count} in ${ms.toFixed(0)} ms)`).toBeGreaterThanOrEqual(Math.floor(ticks * 0.7))
 }
 
-/** Waits until `tab` sees player `id` at the position and yaw `want` (within float32 slack). */
-async function seesAt(tab: Tab, id: string, want: { x: number; z: number; yaw: number }, what: string) {
-  await expect
-    .poll(
-      async () => {
-        const p = get(await snap(tab.page), id)
-        return Math.abs(p.x - want.x) < EPS && Math.abs(p.z - want.z) < EPS && angleDiff(p.yaw, want.yaw) < EPS
-      },
-      { message: `${tab.name} sees ${what}`, timeout: WAIT_MS },
-    )
-    .toBe(true)
+/** A client that watches another player: a tab, or the SDK observer. */
+interface Witness {
+  name: string
+  /** The yaw this client holds for player `id`, or undefined if it holds no such player. */
+  yawOf(id: string): Promise<number | undefined>
+  /** Waits until this client holds player `id` at the position and yaw `want` (within float32 slack). */
+  seesAt(id: string, want: { x: number; z: number; yaw: number }, what: string): Promise<void>
+  /** Starts sampling; the returned function stops and returns the samples. */
+  startSampler(): Promise<() => Promise<Sample[]>>
 }
 
+const tabWitness = (tab: Tab): Witness => ({
+  name: tab.name,
+  yawOf: async (id) => (await snap(tab.page)).players.find((p) => p.id === id)?.yaw,
+  seesAt: (id, want, what) =>
+    expect
+      .poll(
+        async () => {
+          const p = (await snap(tab.page)).players.find((v) => v.id === id)
+          return !!p && Math.abs(p.x - want.x) < EPS && Math.abs(p.z - want.z) < EPS && angleDiff(p.yaw, want.yaw) < EPS
+        },
+        { message: `${tab.name} sees ${what}`, timeout: WAIT_MS },
+      )
+      .toBe(true),
+  startSampler: () => startSampler(tab.page),
+})
+
+const observerWitness = (o: Observer): Witness => ({
+  name: 'the observer',
+  yawOf: async (id) => o.at(id)?.yaw,
+  seesAt: (id, want, what) =>
+    expect
+      .poll(
+        () => {
+          const p = o.at(id)
+          return !!p && Math.abs(p.x - want.x) < EPS && Math.abs(p.z - want.z) < EPS && angleDiff(p.yaw, want.yaw) < EPS
+        },
+        { message: `the observer sees ${what}`, timeout: WAIT_MS },
+      )
+      .toBe(true),
+  startSampler: async () => {
+    const stop = o.record()
+    return async () => stop()
+  },
+})
+
 /** With no mouse input, the camera faces +z and W moves the local player straight +z, as both tabs see it. */
-async function unturnedW(tab: Tab, other: Tab) {
+async function unturnedW(tab: Tab, other: Witness) {
   const s = await snap(tab.page)
   const me = local(s)
   expect(s.camera?.yaw, `${tab.name}: camera yaw is 0 with no mouse input`).toBe(0)
@@ -127,7 +168,7 @@ async function unturnedW(tab: Tab, other: Tab) {
   expect(Math.abs(leg.end.x - leg.start.x), `${tab.name}: unturned W does not move x`).toBeLessThan(EPS)
   expect(leg.end.z - leg.start.z, `${tab.name}: unturned W moves +z`).toBeGreaterThan(step * 5)
   expect(Math.abs(leg.moves - Math.round(leg.moves)), `${tab.name}: a whole number of ${me.team} steps (${leg.moves})`).toBeLessThan(0.02)
-  await seesAt(other, me.id, { ...leg.end, yaw: 0 }, `${tab.name}'s player after the unturned W`)
+  await other.seesAt(me.id, { ...leg.end, yaw: 0 }, `${tab.name}'s player after the unturned W`)
 }
 
 /**
@@ -136,7 +177,7 @@ async function unturnedW(tab: Tab, other: Tab) {
  * (sin yaw, cos yaw) (and (cos yaw, -sin yaw)) at its team's speed, as both
  * tabs see it. Returns the W leg's sustained speed and distance per sent move.
  */
-async function turnAndWalk(tab: Tab, other: Tab): Promise<{ speed: number; perMove: number }> {
+async function turnAndWalk(tab: Tab, other: Witness): Promise<{ speed: number; perMove: number }> {
   const s0 = await snap(tab.page)
   const me = local(s0)
   const team = me.team!
@@ -178,9 +219,9 @@ async function turnAndWalk(tab: Tab, other: Tab): Promise<{ speed: number; perMo
   expect(cam.mode).toBe(MODE_FOR_TEAM[team])
 
   // The server yaw follows (yaw-only moves), within the client's send threshold, in both tabs.
-  for (const t of [tab, other]) {
+  for (const t of [tabWitness(tab), other]) {
     await expect
-      .poll(async () => angleDiff(get(await snap(t.page), me.id).yaw, cam.yaw), {
+      .poll(async () => angleDiff((await t.yawOf(me.id)) ?? Infinity, cam.yaw), {
         message: `${t.name} sees ${tab.name}'s server yaw follow the camera`,
         timeout: WAIT_MS,
       })
@@ -204,7 +245,7 @@ async function turnAndWalk(tab: Tab, other: Tab): Promise<{ speed: number; perMo
   // Hold W: along (sin yaw, cos yaw) at the team's speed.
   const tW = Date.now()
   const stopA = await startSampler(tab.page)
-  const stopB = await startSampler(other.page)
+  const stopB = await other.startSampler()
   const holdW = await holdKey(tab.page, 'KeyW', W_MS)
   await tab.page.waitForTimeout(250)
   const samplesA = await stopA()
@@ -236,7 +277,7 @@ async function turnAndWalk(tab: Tab, other: Tab): Promise<{ speed: number; perMo
   // The server yaw is now exactly the camera yaw (float32), and the other tab agrees.
   const afterW = get(await snap(tab.page), me.id)
   expect(angleDiff(afterW.yaw, cam.yaw), `${tab.name}: server yaw equals the camera yaw after W`).toBeLessThan(EPS)
-  await seesAt(other, me.id, { x: afterW.x, z: afterW.z, yaw: cam.yaw }, `${tab.name}'s player where W took it, facing the camera yaw`)
+  await other.seesAt(me.id, { x: afterW.x, z: afterW.z, yaw: cam.yaw }, `${tab.name}'s player where W took it, facing the camera yaw`)
   // The other tab saw the same straight walk.
   const wB = analyse(track(samplesB, me.id), step)
   expect(angleDiff(wB.heading, cam.yaw), `${other.name} saw ${tab.name}'s W along (sin yaw, cos yaw)`).toBeLessThan(HEADING_TOL)
@@ -257,7 +298,7 @@ async function turnAndWalk(tab: Tab, other: Tab): Promise<{ speed: number; perMo
   const right = Math.atan2(Math.cos(cam.yaw), -Math.sin(cam.yaw))
   expect(angleDiff(d.heading, right), `${tab.name}: D moved along (cos yaw, -sin yaw) (heading ${d.heading})`).toBeLessThan(HEADING_TOL)
   const afterD = get(await snap(tab.page), me.id)
-  await seesAt(other, me.id, { x: afterD.x, z: afterD.z, yaw: cam.yaw }, `${tab.name}'s player where D took it`)
+  await other.seesAt(me.id, { x: afterD.x, z: afterD.z, yaw: cam.yaw }, `${tab.name}'s player where D took it`)
 
   return { speed: w.sustainedSpeed, perMove }
 }
@@ -267,34 +308,44 @@ test('M3 gate: Ghost third person and Warden first person; W and D follow the ca
   let a: Tab | undefined
   let b: Tab | undefined
   let c: Tab | undefined
+  let observer: Observer | undefined
   try {
     // Tab A alone in a fresh room: the ghost, in third person.
     a = await openTab(browser, 'tab A')
-    const sa1 = await joined(a, 1)
+    const sa1 = await joined(a, { ghosts: 1, wardens: 0 })
     expect(sa1.localTeam, 'the first tab is a ghost').toBe('ghost')
     expect(sa1.camera, 'the ghost tab is in third person facing +z').toEqual({ mode: 'third-person', yaw: 0 })
 
     b = await openTab(browser, 'tab B')
-    const sb = await joined(b, 2)
-    const sa = await joined(a, 2)
+    const sb = await joined(b, { ghosts: 1, wardens: 1 })
+    const sa = await joined(a, { ghosts: 1, wardens: 1 })
     expect(sb.localTeam, 'the second tab is a warden').toBe('warden')
     expect(sb.camera, 'the warden tab is in first person facing +z').toEqual({ mode: 'first-person', yaw: 0 })
     expect(sa.camera?.mode, 'the ghost stays in third person when the warden joins').toBe('third-person')
     for (const s of [sa, sb]) expectTeamsAndYaws(s)
     const idA = sa.sessionId!
     const idB = sb.sessionId!
-    expect(get(sb, idA).team, 'tab B sees A as a ghost').toBe('ghost')
     expect(get(sa, idB).team, 'tab A sees B as a warden').toBe('warden')
+    expect(sb.players.some((p) => p.id === idB), 'tab B holds itself').toBe(true)
     await expect(a.page.locator('#hud')).toContainText('you are a Ghost')
     await expect(b.page.locator('#hud')).toContainText('you are a Warden')
 
-    // No mouse input yet: W is +z in both tabs (the old precondition).
-    await unturnedW(a, b)
-    await unturnedW(b, a)
+    // The observer, an SDK Ghost (the third joiner), is sent every player: it witnesses
+    // the Ghost, and tab A (a Ghost) witnesses the Warden.
+    observer = await Observer.join()
+    await observer.waitForPlayers(3)
+    await joined(a, { ghosts: 2, wardens: 1 })
+    await joined(b, { ghosts: 2, wardens: 1 })
+    const watchGhost = observerWitness(observer)
+    const watchWarden = tabWitness(a)
+
+    // No mouse input yet: W is +z for both players, as the witnesses see it (the old precondition).
+    await unturnedW(a, watchGhost)
+    await unturnedW(b, watchWarden)
 
     // Camera-relative W and D, and per-team speed, for the ghost and the warden.
-    const ghost = await turnAndWalk(a, b)
-    const warden = await turnAndWalk(b, a)
+    const ghost = await turnAndWalk(a, watchGhost)
+    const warden = await turnAndWalk(b, watchWarden)
     const report = `ghost ${ghost.speed.toFixed(3)}, warden ${warden.speed.toFixed(3)} units/s`
     test.info().annotations.push({ type: 'sustained speed', description: report })
     console.log(`sustained speed: ${report}`)
@@ -317,12 +368,14 @@ test('M3 gate: Ghost third person and Warden first person; W and D follow the ca
     // The warden leaves; the next joiner is a warden in first person facing +z.
     await b.page.context().close()
     b = undefined
-    await expect.poll(async () => (await snap(a!.page)).players.length, { message: 'tab A sees the warden leave', timeout: WAIT_MS }).toBe(1)
+    await expect
+      .poll(async () => (await snap(a!.page)).players.some((p) => p.id === idB), { message: 'tab A sees the warden leave', timeout: WAIT_MS })
+      .toBe(false)
     c = await openTab(browser, 'tab C')
-    const sc = await joined(c, 2)
+    const sc = await joined(c, { ghosts: 2, wardens: 1 })
     expect(sc.localTeam, 'the rejoiner fills the warden slot').toBe('warden')
     expect(sc.camera).toEqual({ mode: 'first-person', yaw: 0 })
-    const sa2 = await joined(a, 2)
+    const sa2 = await joined(a, { ghosts: 2, wardens: 1 })
     expect(get(sa2, sc.sessionId!).team, 'tab A sees the rejoiner as a warden').toBe('warden')
     expect(local(sa2).team, 'tab A is still the ghost').toBe('ghost')
 
@@ -331,6 +384,7 @@ test('M3 gate: Ghost third person and Warden first person; W and D follow the ca
       expect(t.sent.errors, `${t.name}: every sent move decodes`).toEqual([])
     }
   } finally {
+    await observer?.leave()
     await closeTabs(a, b, c)
   }
 })
@@ -340,7 +394,7 @@ test('a disconnect returns the camera to overhead at yaw 0 and releases the poin
   let tab: Tab | undefined
   try {
     tab = await openTab(browser, 'tab D')
-    const s = await joined(tab, 1)
+    const s = await joined(tab, { ghosts: 1, wardens: 0 })
     const team = s.localTeam!
     expect(s.camera).toEqual({ mode: MODE_FOR_TEAM[team], yaw: 0 })
     await lockPointer(tab)
