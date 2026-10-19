@@ -12,6 +12,7 @@ import { createTerminalView, type TerminalView } from './terminalView.ts'
 import type { Mesh } from '@babylonjs/core/Meshes/mesh'
 import { createAssetLoader, type AssetLoader } from './assets/assetLoader.ts'
 import { gfxSettingsFor, type GfxSettings } from './graphics.ts'
+import { buildPerimeter, texturizeSurfaces } from './surfaces.ts'
 import { createLoadingScreen } from './loadingScreen.ts'
 import { createPerfMeter, type PerfMeter } from './perfOverlay.ts'
 
@@ -84,6 +85,8 @@ export function createGameScene(canvas: HTMLCanvasElement, options: GameSceneOpt
   const overlayParent = canvas.parentElement ?? document.body
   const loadingScreen = createLoadingScreen(overlayParent)
   const loader = options.loader ?? loadingScreen.track(createAssetLoader(scene))
+  buildPerimeter(scene)
+  texturizeSurfaces(scene, gfx, loadingScreen)
   const perf = createPerfMeter(engine, scene, overlayParent)
 
   const players = createPlayerRenderer(scene, loader)

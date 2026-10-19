@@ -41,6 +41,8 @@ export class LoadTracker {
 export interface LoadingScreen {
   /** Wraps a loader so every load it starts is shown on the screen. */
   track(loader: AssetLoader): AssetLoader
+  /** Starts a load that is not a model (textures): report progress, then end. */
+  begin(): { progress(fraction: number): void; end(): void }
   dispose(): void
 }
 
@@ -82,6 +84,20 @@ export function createLoadingScreen(parent: HTMLElement): LoadingScreen {
         }
       },
     }),
+    begin() {
+      const token = tracker.begin()
+      render()
+      return {
+        progress: (f) => {
+          tracker.progress(token, f)
+          render()
+        },
+        end: () => {
+          tracker.end(token)
+          render()
+        },
+      }
+    },
     dispose: () => root.remove(),
   }
 }
