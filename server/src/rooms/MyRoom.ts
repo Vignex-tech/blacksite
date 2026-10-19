@@ -12,6 +12,7 @@ import {
   GROUND_SIZE,
   HIT_EVENT,
   MAX_HEALTH,
+  RELOAD_MESSAGE,
   SHOT_EVENT,
   WEAPONS,
   JUMP_SPEED,
@@ -154,6 +155,17 @@ export class MyRoom extends Room<{ state: MyRoomState }> {
   /** Server-only time (ms, server clock) of each player's last accepted shot; never synchronized. */
   private lastShots = new Map<string, number>();
 
+  /** Server-only time (ms, server clock) at which each reloading player finishes; never synchronized. */
+  private reloadEnds = new Map<string, number>();
+
+  /**
+   * Sessions eliminated since the last simulation step. Kill order rule: within
+   * one step a player who just died can still be hit (the second shooter gets
+   * `hit` with damage 0 and killed false), but only the shot that took health
+   * to 0 reports killed: true. Cleared at the start of each step.
+   */
+  private killedThisStep = new Set<string>();
+
   /** Server-only vertical speeds (u/s, +up) by sessionId; never synchronized. */
   private verticalSpeeds = new Map<string, number>();
 
@@ -235,12 +247,42 @@ export class MyRoom extends Room<{ state: MyRoomState }> {
 
   /** One fixed simulation step. */
   private step() {
+    this.killedThisStep.clear();
+    // Finish reloads that are due (server clock). Eliminated players never reach here with a reload.
+    const t = this.now();
+    this.reloadEnds.forEach((end, id) => {
+      const p = this.state.players.get(id);
+      if (!p || p.health <= 0) {
+        this.reloadEnds.delete(id);
+        return;
+      }
+      if (t < end) return;
+      p.ammo = WEAPONS[p.team as Team].magazine;
+      p.reloading = false;
+      this.reloadEnds.delete(id);
+    });
     this.state.players.forEach((player, sessionId) => {
       if (player.mode !== "falling") return;
       const body = this.bodyOf(sessionId, player);
       stepFall(WORLD, body, SIM_STEP_S);
       this.storeBody(sessionId, player, body);
     });
+  }
+
+  /**
+   * Eliminates a player whose health reached 0: cancels any reload (ammo stays)
+   * and drops an attached player so the simulation settles the body on the
+   * ground. A grounded body stays where it is. No respawn.
+   */
+  private eliminate(sessionId: string, player: Player) {
+    this.killedThisStep.add(sessionId);
+    this.reloadEnds.delete(sessionId);
+    if (player.reloading) player.reloading = false;
+    if (player.mode === "climbing" || player.mode === "hanging") {
+      const body = this.climbBodyOf(sessionId, player);
+      letGo(body);
+      this.storeClimbBody(sessionId, player, body);
+    }
   }
 
   onCreate() {
@@ -252,7 +294,7 @@ export class MyRoom extends Room<{ state: MyRoomState }> {
   messages = {
     [MOVE_MESSAGE]: (client: Client, message: unknown) => {
       const player = this.state.players.get(client.sessionId);
-      if (!player) return;
+      if (!player || player.health <= 0) return;
 
       const move = parseMove(message);
       if (!move) return;
@@ -285,7 +327,7 @@ export class MyRoom extends Room<{ state: MyRoomState }> {
 
     [ACTION_MESSAGE]: (client: Client, message: unknown) => {
       const player = this.state.players.get(client.sessionId);
-      if (!player) return;
+      if (!player || player.health <= 0) return;
 
       const action = parseAction(message);
       if (!action) return;
@@ -314,9 +356,22 @@ export class MyRoom extends Room<{ state: MyRoomState }> {
       if (changed) this.storeClimbBody(client.sessionId, player, body);
     },
 
+    [RELOAD_MESSAGE]: (client: Client, message: unknown) => {
+      const player = this.state.players.get(client.sessionId);
+      if (!player || player.health <= 0) return;
+      if (typeof message !== "object" || message === null || Array.isArray(message)) return;
+      // Shares the fire bucket. Refused reloads still spend a token.
+      if (!this.spendFire(client.sessionId)) return;
+
+      const weapon = WEAPONS[player.team as Team];
+      if (player.reloading || player.ammo >= weapon.magazine) return;
+      player.reloading = true;
+      this.reloadEnds.set(client.sessionId, this.now() + weapon.reloadMs);
+    },
+
     [FIRE_MESSAGE]: (client: Client, message: unknown) => {
       const player = this.state.players.get(client.sessionId);
-      if (!player) return;
+      if (!player || player.health <= 0) return;
 
       const aim = parseFire(message);
       if (!aim) return;
@@ -350,7 +405,8 @@ export class MyRoom extends Room<{ state: MyRoomState }> {
     const origin = { x: shooter.x, y: shooter.y + EYE_HEIGHT, z: shooter.z };
     const targets: Target[] = [];
     this.state.players.forEach((p, id) => {
-      if (id === client.sessionId || p.health <= 0) return;
+      if (id === client.sessionId) return;
+      if (p.health <= 0 && !this.killedThisStep.has(id)) return;
       if (!FRIENDLY_FIRE && p.team === shooter.team) return;
       targets.push({ id, x: p.x, y: p.y, z: p.z });
     });
@@ -368,10 +424,16 @@ export class MyRoom extends Room<{ state: MyRoomState }> {
     });
 
     if (!victim || !hit?.id) return;
+    if (victim.health <= 0) {
+      // Already killed in this step: a hit, but no damage, no second kill, no revive.
+      client.send(HIT_EVENT, { target: hit.id, damage: 0, killed: false });
+      return;
+    }
     const before = victim.health;
     victim.health = Math.max(0, before - weapon.damage);
     const damage = before - victim.health;
     const killed = victim.health <= 0;
+    if (killed) this.eliminate(hit.id, victim);
     client.send(HIT_EVENT, { target: hit.id, damage, killed });
     this.clients.getById(hit.id)?.send(DAMAGED_EVENT, { damage, health: victim.health, killed });
   }
@@ -407,6 +469,8 @@ export class MyRoom extends Room<{ state: MyRoomState }> {
     this.actionBudgets.delete(client.sessionId);
     this.fireBudgets.delete(client.sessionId);
     this.lastShots.delete(client.sessionId);
+    this.reloadEnds.delete(client.sessionId);
+    this.killedThisStep.delete(client.sessionId);
     this.verticalSpeeds.delete(client.sessionId);
     this.attachments.delete(client.sessionId);
     console.log(client.sessionId, "left!", code);
