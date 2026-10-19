@@ -82,16 +82,35 @@ function enter(m: RoundMachine, phase: RoundPhase, endsAt: number | undefined) {
   m.endsAt = endsAt;
 }
 
+/** What the room observed this step, besides the connected counts. */
+export interface RoundFacts {
+  /** The active terminal has reached `hacked`. */
+  hacked: boolean;
+  /** Connected Ghosts with health above 0. */
+  ghostsAlive: number;
+}
+
 /**
  * Advances the machine by at most one transition at server time `now`.
  * `counts` is the number of connected players per team. With `config` null
  * (open) the machine is live and stays so.
+ *
+ * Evaluation order inside one step while `live` (the first outcome is final,
+ * `ended` is never left except by the end timer, #64/#70):
+ *   1. hack completion: Ghosts win, reason `hacked`;
+ *   2. a team has nobody connected: round aborted, no winner, back to waiting;
+ *   3. connected Ghosts exist but none is alive: Wardens win `ghosts_eliminated`
+ *      (this includes the last living Ghost leaving while eliminated ones stay);
+ *   4. the timer ran out: Wardens win `time_out`.
+ * A countdown only checks 2, then its timer. `facts` defaults to "no hack,
+ * every connected Ghost alive".
  */
 export function advanceRound(
   m: RoundMachine,
   config: RoundConfig,
   now: number,
   counts: Readonly<Record<Team, number>>,
+  facts: Readonly<RoundFacts> = { hacked: false, ghostsAlive: counts.ghost },
 ): RoundAdvance {
   const out: RoundAdvance = { phaseChanged: false, reset: false };
   const from = m.phase;
@@ -113,21 +132,26 @@ export function advanceRound(
     m.winReason = "";
     enter(m, "waiting", undefined);
   };
+  const finish = (winner: Team, reason: RoundWinReason) => {
+    m.winner = winner;
+    m.winReason = reason;
+    enter(m, "ended", now + config.endedMs);
+  };
   switch (m.phase) {
     case "waiting":
       if (canStart) startCountdown();
       break;
     case "countdown":
     case "live":
-      if (counts.ghost === 0 || counts.warden === 0) {
+      if (m.phase === "live" && facts.hacked) {
+        finish("ghost", "hacked");
+      } else if (counts.ghost === 0 || counts.warden === 0) {
         toWaiting();
+      } else if (m.phase === "live" && facts.ghostsAlive <= 0) {
+        finish("warden", "ghosts_eliminated");
       } else if (m.endsAt !== undefined && now >= m.endsAt) {
         if (m.phase === "countdown") enter(m, "live", now + config.liveMs);
-        else {
-          m.winner = "warden";
-          m.winReason = "time_out";
-          enter(m, "ended", now + config.endedMs);
-        }
+        else finish("warden", "time_out");
       }
       break;
     case "ended":

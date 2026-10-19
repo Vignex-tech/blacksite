@@ -252,11 +252,21 @@ export class MyRoom extends Room<{ state: MyRoomState }> {
     return this.roundSettings !== null && this.state.round.phase === "live";
   }
 
+  /** Start of a countdown: every terminal idle, alert off, no hackers, progress 0, no decay state (#70). */
+  private resetTerminals() {
+    this.hackers.clear();
+    this.progress = 0;
+    this.progressAt = this.now();
+    this.hackStartedAt = undefined;
+    this.state.terminals.forEach((term) => {
+      if (term.status !== "idle") term.status = "idle";
+      if (term.alert) term.alert = false;
+    });
+  }
+
   /** Gives every connected player a fresh spawn and full health and ammo (start of a countdown). */
   private resetPlayers() {
-    this.settleHack();
-    this.hackers.clear();
-    this.syncTerminal();
+    this.resetTerminals();
     this.state.players.forEach((player, id) => {
       const team = player.team as Team;
       const spawn = randomSpawnPoint(MAP.spawnAreas[team], SOLIDS);
@@ -287,7 +297,15 @@ export class MyRoom extends Room<{ state: MyRoomState }> {
     const counts = { ghost: 0, warden: 0 };
     this.state.players.forEach((p) => { counts[p.team as Team] += 1; });
     const wasLive = this.roundMachine.phase === "live";
-    const adv = advanceRound(this.roundMachine, this.roundSettings, now, counts);
+    // Hack completion is evaluated first in a step: bring progress up to now.
+    if (wasLive) {
+      this.dropInvalidHackers();
+      this.settleHack();
+    }
+    let ghostsAlive = 0;
+    this.state.players.forEach((p) => { if (p.team === "ghost" && p.health > 0) ghostsAlive += 1; });
+    const hacked = this.state.terminals.get(ACTIVE_TERMINAL_ID)?.status === "hacked";
+    const adv = advanceRound(this.roundMachine, this.roundSettings, now, counts, { hacked, ghostsAlive });
     const m = this.roundMachine;
     if (wasLive && m.phase !== "live") {
       // Round over or aborted: no hack carries on.
@@ -387,12 +405,17 @@ export class MyRoom extends Room<{ state: MyRoomState }> {
     }
   }
 
-  /** Runs the hack for one step: drops hackers who can no longer hack, settles progress, updates status. */
-  private stepHack() {
+  /** Removes hackers who can no longer hack (left range, died, left the ground). */
+  private dropInvalidHackers() {
     this.hackers.forEach((id) => {
       const p = this.state.players.get(id);
       if (!p || !canHack(p, ACTIVE_TERMINAL)) this.hackers.delete(id);
     });
+  }
+
+  /** Runs the hack for one step: drops hackers who can no longer hack, settles progress, updates status. */
+  private stepHack() {
+    this.dropInvalidHackers();
     this.settleHack();
     this.syncTerminal();
     this.sendProgress();
