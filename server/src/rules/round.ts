@@ -56,10 +56,18 @@ export function newRoundMachine(): RoundMachine {
   return { phase: "waiting", roundNumber: 0, endsAt: undefined, winner: "", winReason: "" };
 }
 
+/**
+ * Float slack (ms) removed before rounding up. With a fractional clock,
+ * (now + 30000) - now can come out a hair over 30000, which would round up to
+ * 31 (#75). One microsecond is far above the float error and far below any
+ * real difference.
+ */
+export const SECONDS_LEFT_EPSILON_MS = 0.001;
+
 /** Whole seconds left in a timed phase, rounded up; 0 when untimed or past. */
 export function secondsLeft(m: RoundMachine, now: number): number {
   if (m.endsAt === undefined) return 0;
-  return Math.max(0, Math.ceil((m.endsAt - now) / 1000));
+  return Math.max(0, Math.ceil((m.endsAt - now - SECONDS_LEFT_EPSILON_MS) / 1000));
 }
 
 export interface RoundAdvance {

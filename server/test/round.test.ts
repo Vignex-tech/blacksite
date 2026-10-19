@@ -107,3 +107,30 @@ describe("advanceRound", () => {
     assert.deepStrictEqual([open.phase, open.roundNumber, open.endsAt], ["live", 0, undefined]);
   });
 });
+
+describe("secondsLeft with a fractional clock (#75)", () => {
+  it("never reads one second too high right after a phase starts", () => {
+    let overshoots = 0;
+    for (const dur of [2000, 30000, 3000, 420000, 10000]) {
+      for (let i = 1; i <= 5000; i++) {
+        const now = 123456.789 + i * 0.1234567891 + (i % 7) * 1e5;
+        const m = newRoundMachine();
+        m.phase = "live";
+        m.endsAt = now + dur;
+        if (m.endsAt - now > dur) overshoots += 1;
+        assert.strictEqual(secondsLeft(m, now), dur / 1000, `dur ${dur} now ${now}`);
+      }
+    }
+    assert.ok(overshoots > 0, "the sample must contain clocks where the float sum overshoots");
+  });
+
+  it("still rounds a genuine part-second up and reaches 0 at the end", () => {
+    const m = newRoundMachine();
+    m.phase = "live";
+    m.endsAt = 10000;
+    assert.strictEqual(secondsLeft(m, 9000.5), 1);
+    assert.strictEqual(secondsLeft(m, 8999), 2);
+    assert.strictEqual(secondsLeft(m, 10000), 0);
+    assert.strictEqual(secondsLeft(m, 10001), 0);
+  });
+});
