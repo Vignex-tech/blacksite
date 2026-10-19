@@ -95,10 +95,11 @@ test('default tier loads with no external requests and reports perf', async ({ p
     .toBeGreaterThan(0)
   const perf = await page.evaluate(() => (window as any).__blacksite.snapshot().perf)
   expect(Number.isFinite(perf.fps) && perf.fps >= 0).toBe(true)
-  // The art budget is 120 draw calls and 150k triangles (art-plan section 9), reached when
-  // the decoration is merged (#85/#93). The graybox map measures about 376 draw calls today
-  // (one per solid), so this is a regression ceiling to ratchet down, not the target.
-  expect(perf.drawCalls).toBeLessThanOrEqual(500)
+  // The art budget is 120 draw calls and 150k triangles (art-plan section 9). The hook reports
+  // one frame's draw calls (fixed in #82; before that it accumulated, which is why #80 saw 376).
+  // Measured about 33 with the characters in view and 5 in the Warden's first person, so the
+  // 120 budget leaves wide margin for the props and surfaces to come (#85, #89).
+  expect(perf.drawCalls).toBeLessThanOrEqual(120)
   expect(perf.activeTriangles).toBeGreaterThan(0)
   expect(perf.activeTriangles).toBeLessThanOrEqual(150_000)
 
