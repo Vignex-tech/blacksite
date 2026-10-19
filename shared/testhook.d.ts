@@ -112,14 +112,14 @@ export interface BlacksiteSnapshot {
    */
   events: { shots: number; hits: number; kills: number; damaged: number }
   /**
-   * Terminals as received from room state (M6, #54), optional and additive;
-   * nothing fills it yet. `active` is true for `ACTIVE_TERMINAL_ID`. A Warden
+   * Terminals as received from room state (M6, #54; filled since #60), additive;
+   * empty before they arrive. `active` is true for `ACTIVE_TERMINAL_ID`. A Warden
    * client sees only what the server sends it: no progress, no hacker.
    */
   terminals?: { id: string; status: TerminalStatus; alert: boolean; active: boolean }[]
   /**
    * The local Ghost's hack progress, 0 to 1, from `hackProgress` messages
-   * (M6, #54). null or absent for a Warden, who is never told the progress.
+   * (M6, #54; #60). null until a message arrives and for a Warden, who is never told the progress.
    */
   hack?: { progress: number } | null
 }

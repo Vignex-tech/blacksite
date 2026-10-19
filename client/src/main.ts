@@ -1,14 +1,26 @@
 import './style.css'
 import { createGameScene, type GameScene } from './scene.ts'
-import { ActionInput, FireInput, MovementInput } from './input.ts'
-import { joinGame, onCombatEvents, sendAction, sendFire, sendMove, sendReload, type PlayerView } from './net.ts'
+import { ActionInput, FireInput, InteractInput, MovementInput } from './input.ts'
+import {
+  joinGame,
+  onCombatEvents,
+  onHackProgress,
+  sendAction,
+  sendFire,
+  sendInteract,
+  sendMove,
+  sendReload,
+  watchTerminals,
+  type PlayerView,
+} from './net.ts'
 import { climbPrompt, modeText, type LocalPlayerState } from './traversalHint.ts'
-import type { Team } from '../../shared/protocol.js'
+import { CAN_HACK, type Team } from '../../shared/protocol.js'
 import type { Room } from '@colyseus/sdk'
 import { installTestHook } from './testHook.ts'
 import { wrapAngle } from './cameras.ts'
 import { FirePacer } from './firePacer.ts'
 import { createCombatFeedback } from './combat.ts'
+import { HACKED_TEXT, hackAlertText, hackBarText, hackPrompt, progressPercent, type TerminalSnapshot } from './hackHint.ts'
 import { ammoText, crosshairVisible, healthText, isEliminated, type LocalVitals } from './vitals.ts'
 
 /** How often a held movement key sends a "move" message. */
@@ -86,6 +98,32 @@ function start(view: GameScene): void {
   crosshair.hidden = true
   app.appendChild(crosshair)
   let vitals: LocalVitals | null = null
+
+  // Hack feedback (#60): prompt, Ghost-only progress bar and the Warden alert.
+  // Everything shown comes from received state; nothing is predicted.
+  const hackPromptLine = document.createElement('div')
+  hackPromptLine.id = 'hack-prompt'
+  app.appendChild(hackPromptLine)
+  const hackBar = document.createElement('div')
+  hackBar.id = 'hack-bar'
+  app.appendChild(hackBar)
+  const hackAlert = document.createElement('div')
+  hackAlert.id = 'hack-alert'
+  app.appendChild(hackAlert)
+  const terminals = new Map<string, TerminalSnapshot>()
+  let hackProgress: number | null = null
+  const showHack = (): void => {
+    const team = local?.team ?? null
+    const p = hackPrompt(local ? { ...local, health: vitals?.health } : null, terminals)
+    if (hackPromptLine.textContent !== p) hackPromptLine.textContent = p
+    const b = hackBarText(team, hackProgress, terminals)
+    if (hackBar.textContent !== b) hackBar.textContent = b
+    hackBar.style.setProperty('--progress', `${hackProgress === null ? 0 : progressPercent(hackProgress)}%`)
+    const a = hackAlertText(team, terminals)
+    if (hackAlert.textContent !== a) hackAlert.textContent = a
+    const kind = a === HACKED_TEXT ? 'done' : ''
+    if (hackAlert.className !== kind) hackAlert.className = kind
+  }
   const showVitals = (): void => {
     const h = healthText(vitals)
     if (healthLine.textContent !== h) healthLine.textContent = h
@@ -105,6 +143,19 @@ function start(view: GameScene): void {
   // One message per press of Space, E or C; the server decides the outcome.
   new ActionInput((action) => {
     if (room) sendAction(room, action)
+  })
+
+  // Hold F to hack: true on keydown, false on keyup. Only a living Ghost in a
+  // team camera sends anything; the server decides range and timing.
+  const interactActive = (): boolean =>
+    room !== null &&
+    rig.mode !== 'overhead' &&
+    vitals !== null &&
+    vitals.team !== null &&
+    CAN_HACK[vitals.team] &&
+    !isEliminated(vitals.health)
+  const interactInput = new InteractInput(interactActive, (active) => {
+    if (room) sendInteract(room, active)
   })
 
   // Fire (hold left mouse) and reload (R), only while the pointer is locked,
@@ -132,6 +183,8 @@ function start(view: GameScene): void {
   setInterval(() => {
     const locked = document.pointerLockElement === canvas
     showVitals()
+    showHack()
+    interactInput.sync()
     hint.textContent = rig.mode !== 'overhead' && !locked ? 'Click to look around (Esc releases the mouse)' : ''
     if (!room) return
     if (fireInput.firing() && vitals && vitals.team && vitals.ammo > 0 && !vitals.reloading) {
@@ -178,6 +231,7 @@ function start(view: GameScene): void {
           ? { team: pose.team, health: pose.health ?? 1, ammo: pose.ammo ?? 0, reloading: pose.reloading ?? false }
           : null
         showVitals()
+        showHack()
       }
       if (isLocal && pose && pose.team !== localTeam) {
         localTeam = pose.team
@@ -196,6 +250,17 @@ function start(view: GameScene): void {
       room = joined
       testHook.setConnected(joined.sessionId)
       showOnline()
+      watchTerminals(joined, (id, status, alert) => {
+        terminals.set(id, { status, alert })
+        testHook.setTerminal(id, status, alert)
+        view.terminals.update(id, status)
+        showHack()
+      })
+      onHackProgress(joined, (progress) => {
+        hackProgress = progress
+        testHook.setHackProgress(progress)
+        showHack()
+      })
       onCombatEvents(joined, {
         onShot: (e) => {
           testHook.recordEvent('shot')
@@ -216,8 +281,13 @@ function start(view: GameScene): void {
         localTeam = null
         local = null
         vitals = null
+        terminals.clear()
+        hackProgress = null
+        view.terminals.reset()
+        interactInput.sync()
         showMode()
         showVitals()
+        showHack()
         rig.reset()
         testHook.setDisconnected()
         setStatus('disconnected from server')

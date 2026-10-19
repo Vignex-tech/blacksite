@@ -140,3 +140,47 @@ body,
   box-shadow: inset 0 0 120px 30px rgba(200, 0, 0, 0.55);
   pointer-events: none;
 }
+
+#hack-prompt,
+#hack-bar,
+#hack-alert {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  font-family: system-ui, sans-serif;
+  text-shadow: 0 0 4px #000;
+  pointer-events: none;
+  user-select: none;
+}
+
+#hack-prompt {
+  top: 62%;
+  color: #8dff9c;
+  font-size: 0.95rem;
+}
+
+#hack-bar {
+  top: 66%;
+  min-width: 9rem;
+  padding: 0.15rem 0.5rem;
+  text-align: center;
+  color: #fff;
+  font-size: 0.85rem;
+  border: 1px solid #8dff9c;
+  background: linear-gradient(to right, rgba(60, 200, 90, 0.75) var(--progress, 0%), rgba(0, 0, 0, 0.55) var(--progress, 0%));
+}
+
+#hack-bar:empty {
+  display: none;
+}
+
+#hack-alert {
+  top: 12%;
+  color: #ff8a5c;
+  font-size: 1.1rem;
+  font-weight: 600;
+}
+
+#hack-alert.done {
+  color: #ffd35c;
+}

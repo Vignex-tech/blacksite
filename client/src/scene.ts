@@ -8,6 +8,7 @@ import { buildMap, buildTraversal, type RenderedMap, type RenderedTraversal } fr
 import type { PlayerPose } from './net.ts'
 import { createPlayerRenderer } from './players.ts'
 import { createCameraRig, type CameraRig } from './cameras.ts'
+import { createTerminalView, type TerminalView } from './terminalView.ts'
 import type { Mesh } from '@babylonjs/core/Meshes/mesh'
 
 /** Camera tilt from straight down (radians) and distance from the map centre. */
@@ -21,6 +22,8 @@ export interface GameScene {
   map: RenderedMap
   /** The upper level built from shared data (floors, ramps and anchors, M4). */
   traversal: RenderedTraversal
+  /** Terminal post colours: active, dim, hacked (M6). */
+  terminals: TerminalView
   /** Overhead, Ghost third-person or Warden first-person camera (cameras.ts). */
   camera: CameraRig
   /**
@@ -56,6 +59,7 @@ export function createGameScene(canvas: HTMLCanvasElement): GameScene {
 
   const map = buildMap(scene)
   const traversal = buildTraversal(scene)
+  const terminals = createTerminalView(scene)
 
   const players = createPlayerRenderer(scene)
   const { upsertPlayer, removePlayer } = players
@@ -88,6 +92,7 @@ export function createGameScene(canvas: HTMLCanvasElement): GameScene {
     scene,
     map,
     traversal,
+    terminals,
     camera,
     upsertPlayer,
     removePlayer,

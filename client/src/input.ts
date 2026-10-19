@@ -126,3 +126,60 @@ export class FireInput {
     return this.buttonHeld
   }
 }
+
+/** Interact (hack) keys by KeyboardEvent.code (M6, #53): hold F; E stays climb. */
+export const INTERACT_KEYS: readonly string[] = Object.freeze(['KeyF'])
+
+/**
+ * Hold-to-interact. Keydown sends `true` once (auto-repeat and a second keydown
+ * are ignored), keyup or blur sends `false`. Nothing is sent while
+ * `isActive()` is false (overhead, disconnected, eliminated, a team that can't
+ * hack); a press made while inactive sends nothing, and neither does its
+ * release. `sync()` (call it every tick) releases a hold that became inactive.
+ * Ctrl, Meta and Alt combinations are ignored and not prevented.
+ */
+export class InteractInput {
+  private readonly held = new Set<string>()
+  private sent = false
+
+  private readonly isActive: () => boolean
+  private readonly onInteract: (active: boolean) => void
+
+  constructor(isActive: () => boolean, onInteract: (active: boolean) => void, target: Window = window) {
+    this.isActive = isActive
+    this.onInteract = onInteract
+    target.addEventListener('keydown', (e) => {
+      if (!INTERACT_KEYS.includes(e.code) || e.ctrlKey || e.metaKey || e.altKey) return
+      e.preventDefault()
+      if (e.repeat || this.held.has(e.code)) return
+      this.held.add(e.code)
+      if (this.isActive()) this.press()
+    })
+    target.addEventListener('keyup', (e) => {
+      if (!INTERACT_KEYS.includes(e.code)) return
+      this.held.delete(e.code)
+      if (this.held.size === 0) this.release()
+    })
+    target.addEventListener('blur', () => {
+      this.held.clear()
+      this.release()
+    })
+  }
+
+  private press(): void {
+    if (this.sent) return
+    this.sent = true
+    this.onInteract(true)
+  }
+
+  private release(): void {
+    if (!this.sent) return
+    this.sent = false
+    this.onInteract(false)
+  }
+
+  /** Releases a hold whose input went inactive (eliminated, disconnected). */
+  sync(): void {
+    if (this.sent && !this.isActive()) this.release()
+  }
+}

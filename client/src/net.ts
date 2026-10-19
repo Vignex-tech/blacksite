@@ -3,13 +3,16 @@ import {
   ACTION_MESSAGE,
   DAMAGED_EVENT,
   FIRE_MESSAGE,
+  HACK_PROGRESS_MESSAGE,
   HIT_EVENT,
+  INTERACT_MESSAGE,
   MOVE_MESSAGE,
   MOVEMENT_MODES,
   RELOAD_MESSAGE,
   ROOM_NAME,
   SHOT_EVENT,
   TEAMS,
+  TERMINAL_STATUSES,
   type Action,
   type DamagedEvent,
   type HitEvent,
@@ -18,6 +21,8 @@ import {
   type MovementMode,
   type PlayerState,
   type Team,
+  type TerminalState,
+  type TerminalStatus,
 } from '../../shared/protocol.js'
 import { defaultVitals } from './vitals.ts'
 
@@ -124,6 +129,34 @@ export function sendAction(room: Room, action: Action): void {
   room.send(ACTION_MESSAGE, { action })
 }
 
+/** Sends one "interact" message: hold F sends true, release sends false. The server decides everything else. */
+export function sendInteract(room: Room, active: boolean): void {
+  room.send(INTERACT_MESSAGE, { active })
+}
+
+/** Mirrors `state.terminals` into the handler. Unknown statuses are dropped. */
+export function watchTerminals(
+  room: Room,
+  onTerminal: (id: string, status: TerminalStatus, alert: boolean) => void,
+): void {
+  const callbacks = Callbacks.get(room) as unknown as TerminalCallbacks
+  callbacks.onAdd('terminals', (t, id) => {
+    const update = (): void => {
+      if ((TERMINAL_STATUSES as readonly string[]).includes(t.status)) onTerminal(id, t.status, t.alert === true)
+    }
+    update()
+    callbacks.onChange(t, update)
+  })
+}
+
+/** Subscribes to the Ghost-only hack progress (0..1). Malformed payloads are dropped; values are clamped. */
+export function onHackProgress(room: Room, handler: (progress: number) => void): void {
+  room.onMessage(HACK_PROGRESS_MESSAGE, (m: unknown) => {
+    const p = isObj(m) ? m.progress : undefined
+    if (typeof p === 'number' && Number.isFinite(p)) handler(Math.min(1, Math.max(0, p)))
+  })
+}
+
 /** Sends one "fire" message: aim only. `pitch` is on the wire convention (positive looks up). */
 export function sendFire(room: Room, yaw: number, pitch: number): void {
   room.send(FIRE_MESSAGE, { yaw, pitch })
@@ -163,4 +196,9 @@ interface PlayersCallbacks {
   onAdd(property: 'players', handler: (player: PlayerState, sessionId: string) => void): () => void
   onRemove(property: 'players', handler: (player: PlayerState, sessionId: string) => void): () => void
   onChange(instance: PlayerState, handler: () => void): () => void
+}
+
+interface TerminalCallbacks {
+  onAdd(property: 'terminals', handler: (terminal: TerminalState, id: string) => void): () => void
+  onChange(instance: TerminalState, handler: () => void): () => void
 }
