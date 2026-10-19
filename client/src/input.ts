@@ -1,4 +1,4 @@
-import type { MoveMessage } from '../../shared/protocol.js'
+import type { Action, MoveMessage } from '../../shared/protocol.js'
 
 /** Movement keys by KeyboardEvent.code. +z is away from the camera, +x is to its right. */
 const KEY_DIRECTIONS: Record<string, MoveMessage> = {
@@ -38,5 +38,38 @@ export class MovementInput {
     dx = Math.sign(dx)
     dz = Math.sign(dz)
     return dx === 0 && dz === 0 ? null : { dx, dz }
+  }
+}
+
+/**
+ * Action keys by KeyboardEvent.code (proposed defaults approved on #26):
+ * Space jumps, E climbs, grabs a ledge or mantles from hanging, C drops.
+ * Each press sends one `{ action }` message; the server decides what happens.
+ */
+export const ACTION_KEYS: Readonly<Record<string, Action>> = Object.freeze({
+  Space: 'jump',
+  KeyE: 'climb',
+  KeyC: 'drop',
+})
+
+/**
+ * Turns action key presses into one callback per press. Key auto-repeat is
+ * ignored (a key must be released before it fires again), as are Ctrl, Meta
+ * and Alt combinations. Space never scrolls the page.
+ */
+export class ActionInput {
+  private readonly held = new Set<string>()
+
+  constructor(onAction: (action: Action) => void, target: Window = window) {
+    target.addEventListener('keydown', (e) => {
+      const action = Object.prototype.hasOwnProperty.call(ACTION_KEYS, e.code) ? ACTION_KEYS[e.code] : undefined
+      if (!action || e.ctrlKey || e.metaKey || e.altKey) return
+      e.preventDefault() // Space would scroll the page
+      if (e.repeat || this.held.has(e.code)) return
+      this.held.add(e.code)
+      onAction(action)
+    })
+    target.addEventListener('keyup', (e) => this.held.delete(e.code))
+    target.addEventListener('blur', () => this.held.clear())
   }
 }

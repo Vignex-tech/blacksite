@@ -45,3 +45,27 @@ body,
   pointer-events: none;
   user-select: none;
 }
+
+#mode {
+  position: absolute;
+  top: 2.1rem;
+  left: 1rem;
+  color: #bbb;
+  font-family: system-ui, sans-serif;
+  font-size: 0.85rem;
+  pointer-events: none;
+  user-select: none;
+}
+
+#climb-prompt {
+  position: absolute;
+  top: 58%;
+  left: 50%;
+  transform: translateX(-50%);
+  color: #6ef0ff;
+  font-family: system-ui, sans-serif;
+  font-size: 0.95rem;
+  text-shadow: 0 0 4px #000;
+  pointer-events: none;
+  user-select: none;
+}

@@ -1,7 +1,8 @@
 import './style.css'
 import { createGameScene, type GameScene } from './scene.ts'
-import { MovementInput } from './input.ts'
-import { joinGame, sendMove, type PlayerView } from './net.ts'
+import { ActionInput, MovementInput } from './input.ts'
+import { joinGame, sendAction, sendMove, type PlayerView } from './net.ts'
+import { climbPrompt, modeText, type LocalPlayerState } from './traversalHint.ts'
 import type { Team } from '../../shared/protocol.js'
 import type { Room } from '@colyseus/sdk'
 import { installTestHook } from './testHook.ts'
@@ -61,6 +62,27 @@ function start(view: GameScene): void {
   hint.id = 'camera-hint'
   app.appendChild(hint)
 
+  // Movement mode feedback (#35), separate from #hud so its text keeps its
+  // format. Display only, from the local player's server state.
+  const modeLine = document.createElement('div')
+  modeLine.id = 'mode'
+  app.appendChild(modeLine)
+  const prompt = document.createElement('div')
+  prompt.id = 'climb-prompt'
+  app.appendChild(prompt)
+  let local: LocalPlayerState | null = null
+  const showMode = (): void => {
+    const text = modeText(local)
+    if (modeLine.textContent !== text) modeLine.textContent = text
+    const p = climbPrompt(local)
+    if (prompt.textContent !== p) prompt.textContent = p
+  }
+
+  // One message per press of Space, E or C; the server decides the outcome.
+  new ActionInput((action) => {
+    if (room) sendAction(room, action)
+  })
+
   // One shared 20 Hz tick: held keys are camera-relative intent (strafe dx,
   // forward dz) sent with the camera yaw; with no key held, a yaw-only move
   // is sent only when the camera turned. The server decides the actual step.
@@ -103,6 +125,10 @@ function start(view: GameScene): void {
       inner.upsertPlayer(id, x, z, isLocal, pose)
       // The camera follows your own player's server position only.
       if (isLocal) rig.setLocalPlayer(id, x, z, pose?.team ?? null, pose?.yaw ?? 0, pose?.y ?? 0)
+      if (isLocal) {
+        local = { team: pose?.team ?? null, mode: pose?.mode ?? 'ground', x, y: pose?.y ?? 0, z }
+        showMode()
+      }
       if (isLocal && pose && pose.team !== localTeam) {
         localTeam = pose.team
         if (room) showOnline()
@@ -123,6 +149,8 @@ function start(view: GameScene): void {
       joined.onLeave(() => {
         room = null
         localTeam = null
+        local = null
+        showMode()
         rig.reset()
         testHook.setDisconnected()
         setStatus('disconnected from server')

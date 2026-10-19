@@ -1,9 +1,11 @@
 import { Callbacks, Client, type Room } from '@colyseus/sdk'
 import {
+  ACTION_MESSAGE,
   MOVE_MESSAGE,
   MOVEMENT_MODES,
   ROOM_NAME,
   TEAMS,
+  type Action,
   type MoveMessage,
   type MovementMode,
   type PlayerState,
@@ -93,6 +95,11 @@ export async function joinGame(view: PlayerView, onPlayerCount: (count: number) 
 /** Sends one "move" message. The server is authoritative; nothing moves locally. */
 export function sendMove(room: Room, move: MoveMessage): void {
   room.send(MOVE_MESSAGE, move)
+}
+
+/** Sends one "action" message (one per key press). The server decides whether it does anything. */
+export function sendAction(room: Room, action: Action): void {
+  room.send(ACTION_MESSAGE, { action })
 }
 
 /** The subset of the SDK callbacks API used here, typed against the shared player shape. */
