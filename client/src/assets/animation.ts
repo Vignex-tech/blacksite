@@ -252,19 +252,25 @@ export function createCharacterAnimator(model: LoadedModel, team: Team): Charact
   let phase = 0
   let disposed = false
 
+  let restarting = false
   const startOneShot = (kind: OneShot): void => {
     const clip = ONE_SHOT_CLIP[kind]
     if (!groups.has(clip)) return
-    oneShot = kind
-    // Restart even if the same clip is already running.
+    // Restart even if the same clip is already running. stop() fires the end
+    // observable, which must not clear the one-shot being started.
     const g = groups.get(clip)!
-    if (playing === g) g.stop()
+    if (playing === g) {
+      restarting = true
+      g.stop()
+      restarting = false
+    }
     playing = null
+    oneShot = kind
   }
 
   for (const g of groups.values()) {
     g.onAnimationGroupEndObservable.add(() => {
-      if (oneShot && ONE_SHOT_CLIP[oneShot] === g.name) {
+      if (!restarting && oneShot && ONE_SHOT_CLIP[oneShot] === g.name) {
         // A reload or a fire clip does not hold the pose past its end.
         oneShot = null
         if (playing === g) playing = null
