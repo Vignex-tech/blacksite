@@ -5,7 +5,7 @@ Last updated 2026-10-19 by the director after milestone 5, on the owner's Window
 ## State
 - Repo: `Vignex-tech/blacksite` (private), branch `main`. Milestones #1, #9 (M2), #17 (M3), #26 (M4) and #38 (M5) are done; the M5 gate commit is `b4d84c4` ([run](https://github.com/Vignex-tech/blacksite/actions/runs/39249661131), CI green).
 - CI: `.github/workflows/ci.yml` (job `build-and-test`) builds the client and server, then runs Mocha (server), Vitest (`Tests/unit`) and Playwright (`Tests/e2e`). **Nothing counts as done until CI passes** (see `CLAUDE.md`).
-- Next: milestone 6 (one hackable terminal); the tracking issue (label `milestone`) and its run order are on GitHub and in `Docs/phase1-plan.md`. Owner decisions are proposed defaults on the tracking issue. No open bugs. Follow-ups from M3 to M5 are in `Docs/backlog.md`.
+- Next: milestone 6 (one hackable terminal); tracking issue #53, issues #54 to #62 in run order (see `Docs/phase1-plan.md`); start with #54. Owner decisions are proposed defaults on the tracking issue. No open bugs. Follow-ups from M3 to M5 are in `Docs/backlog.md`.
 
 ### Shared contract (`shared/`)
 - Plain ESM `.js` runtime files with `.d.ts` types, and `shared/package.json` (`"type": "module"`). The client imports `../../shared/<file>.js` and the server `../../../shared/<file>.js` (from `server/src/rooms/` or `server/src/rules/`).

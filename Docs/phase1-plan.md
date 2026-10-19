@@ -78,11 +78,27 @@ Milestones #1 (two tabs join one room and see each other move), #9 (graybox map,
 - **Gate:** shots through walls never hit; fire rate and ammo are enforced on the server (a forged rapid-fire client is capped); a Ghost dies in fewer hits than a Warden; an eliminated player cannot move, act or shoot; a Warden client is not sent the position of a Ghost behind a wall.
 - **Not in M5:** respawn and rounds (M7), terminals (M6), lag compensation, headshots, recoil, spectator camera, gadgets, flashlight and sound cues (Phase 2).
 
-### Milestone 6: one hackable terminal
+### Milestone 6: one hackable terminal (tracking issue #53, issues #54 to #62)
 - **Goal:** a Ghost can hack one data terminal by holding interact in range, and the Warden can interrupt it.
-- **Order:** `shared/` first: interact start and stop messages, terminal state (progress, who is hacking) and the hack duration constant. Then server: range and team checks, progress over server time, interruption on leaving range, taking damage or elimination, progress keeps or decays (to decide in the issue), completion. Only one terminal from the map is active in Phase 1. Then client: terminal marker, interact prompt, progress bar.
-- **Agents:** gameplay-engineer, server-engineer, qa-build.
-- **Gate:** a Ghost in range completes the hack in the configured time; out of range, as a Warden, or while hit, progress does not advance; a forged interact from across the map is rejected.
+- **Order:** `shared/` first: the interact message (`{ active }`, no terminal id), terminal state (`status`, `alert`), the hack constants and the active terminal id (#54). qa-build makes the tests ready (#55). Then server: range, team and mode checks, progress over server time, decay, completion (#56); interruptions (moving, damage, elimination, leaving range or the ground) and what a Warden learns (#58). Then client: terminal marker, prompt, progress bar, Warden alert, F binding (#60). Each is followed by a qa-build issue, ending with the real-tab gate (#62).
+- **Run order (one agent at a time):**
+
+  | Order | # | Issue | Agent | Depends on |
+  |---|---|---|---|---|
+  | 1 | #54 | Shared contract: interact message, hack constants, terminal state, active terminal | gameplay-engineer | none |
+  | 2 | #55 | QA: make existing tests ready for terminal state and the interact message | qa-build | #54 |
+  | 3 | #56 | Server: hack the active terminal over server time | server-engineer | #54, #55 |
+  | 4 | #57 | QA: verify the server hack, range, team and forged interacts | qa-build | #56 |
+  | 5 | #58 | Server: hack interruptions and what Wardens learn | server-engineer | #56, #57 |
+  | 6 | #59 | QA: verify interruptions and the Warden information limit on the wire | qa-build | #58 |
+  | 7 | #60 | Client: terminal marker, hack prompt and bar, Warden alert, F binding | gameplay-engineer | #58, #59 |
+  | 8 | #61 | QA: verify the terminal UI and input | qa-build | #60 |
+  | 9 | #62 | QA: M6 gate in real tabs | qa-build | #61 |
+
+- **Proposed defaults (the owner can change them; each is one constant):** active terminal `terminal-a`; hack 10 s; range 1.5; hold F; Ghosts only, no stacking; interrupted by leaving range, moving, damage, elimination or leaving the ground; progress is kept and then decays at half the gain rate; `interact` bucket 4/s burst 2. Wardens learn only `hacking`/`alert` (after 3 s) and `hacked`, never progress or the hacker; Ghosts get their progress in a Ghost-only message. The full list is on #53.
+- **Agents:** gameplay-engineer (#54, #60), server-engineer (#56, #58), qa-build (#55, #57, #59, #61, #62).
+- **Gate:** a Ghost in range completes the hack in the configured time; out of range, as a Warden, or while hit, progress does not advance; a forged interact from across the map is rejected; a Warden client is never told the progress or the hacker.
+- **Not in M6:** the win, the round timer and the terminal reset (M7), the extraction step and the second active terminal (Phase 2).
 
 ### Milestone 7: timed round, win and loss
 - **Goal:** a round starts, runs on a configurable timer, ends with a winner and resets.
