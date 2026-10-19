@@ -15,7 +15,7 @@
 //   changes meaning (#48 made `health`, `ammo` and `reloading` always present), so tests should match the fields they need, not the
 //   exact shape.
 
-import type { MovementMode, Team, TerminalStatus } from './protocol.js'
+import type { MovementMode, RoundPhase, RoundWinReason, Team, TerminalStatus } from './protocol.js'
 
 /** One player as the client currently knows it from room state. */
 export interface BlacksitePlayerSnapshot {
@@ -122,6 +122,17 @@ export interface BlacksiteSnapshot {
    * (M6, #54; #60). null until a message arrives and for a Warden, who is never told the progress.
    */
   hack?: { progress: number } | null
+  /**
+   * Round fields as received from room state (M7, #66), additive; nothing fills
+   * it until the client reads them. Public: Ghost and Warden clients see the same.
+   */
+  round?: {
+    phase: RoundPhase
+    roundNumber: number
+    secondsLeft: number
+    winner: Team | ''
+    winReason: RoundWinReason | ''
+  }
 }
 
 export interface BlacksiteTestHook {

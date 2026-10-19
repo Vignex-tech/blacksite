@@ -104,6 +104,8 @@ export interface GameRoomState {
   players: ReadonlyKeyedMap<PlayerState>
   /** Terminals keyed by terminal id (M6, #54). Not populated until the server adds it (#56). */
   terminals: ReadonlyKeyedMap<TerminalState>
+  /** Round phase, timer and result (M7, #66). Public to every client. */
+  round: RoundState
 }
 
 // ---------------------------------------------------------------------------
@@ -405,4 +407,74 @@ export declare const HACK_PROGRESS_MESSAGE: 'hackProgress'
  */
 export interface HackProgressMessage {
   progress: number
+}
+
+// ---------------------------------------------------------------------------
+// The timed round (M7, #66). Runtime values live in protocol.js. Nothing reads
+// them until the server applies them (#68). No behaviour changes with this
+// contract.
+
+/** Round phases, frozen: `['waiting', 'countdown', 'live', 'ended']`. */
+export declare const ROUND_PHASES: readonly ['waiting', 'countdown', 'live', 'ended']
+export type RoundPhase = 'waiting' | 'countdown' | 'live' | 'ended'
+
+/** Why a round was won, frozen: `['hacked', 'ghosts_eliminated', 'time_out']`. */
+export declare const ROUND_WIN_REASONS: readonly ['hacked', 'ghosts_eliminated', 'time_out']
+export type RoundWinReason = 'hacked' | 'ghosts_eliminated' | 'time_out'
+
+/**
+ * Round timers and start rule. All durations are milliseconds, finite and
+ * positive. This is the shape the server config uses. The server is configured
+ * once at startup from its own environment (#68; the shared files never read
+ * `process` or `location`). Clients never send settings: no message carries
+ * them, and no room or join option sets them (rule 1).
+ */
+export interface RoundSettings {
+  /** Countdown before a round goes live: 10000. */
+  countdownMs: number
+  /** Live round length: 420000 (7 minutes). */
+  liveMs: number
+  /** How long the result shows before the next round: 10000. */
+  endedMs: number
+  /** Players needed on each team before a countdown starts: 1. */
+  minPlayersPerTeam: number
+}
+
+/** Frozen defaults: `{ countdownMs: 10000, liveMs: 420000, endedMs: 10000, minPlayersPerTeam: 1 }`. */
+export declare const DEFAULT_ROUND_SETTINGS: Readonly<RoundSettings>
+
+/**
+ * Round fields in room state. Public to every client and identical for Ghost
+ * and Warden clients: no alive counts, no hack progress, no hacker.
+ *
+ * Rules the server applies (#68, #70):
+ * - During `waiting`, `countdown` and `ended` a player is frozen: move,
+ *   action, fire, reload and interact are ignored.
+ * - A player who joins during `live` sits out (health 0, shown as eliminated)
+ *   until the next round, so leaving and rejoining gives no fresh life.
+ */
+export interface RoundState {
+  phase: RoundPhase
+  /** Integer; 0 until the first countdown starts. */
+  roundNumber: number
+  /** Whole seconds left in the current timed phase, rounded up. 0 in `waiting` and when a phase has no timer. */
+  secondsLeft: number
+  /** Winning team; '' until `ended`, and '' for an aborted round. */
+  winner: Team | ''
+  /** Why `winner` won, or '' (no winner yet, or aborted). */
+  winReason: RoundWinReason | ''
+}
+
+/** Server-to-client event name for a phase change. Payload: RoundEvent. */
+export declare const ROUND_EVENT: 'round'
+
+/**
+ * Sent to all clients on every phase change. A convenience only: room state
+ * (`round`) is the truth.
+ */
+export interface RoundEvent {
+  phase: RoundPhase
+  roundNumber: number
+  winner: Team | ''
+  winReason: RoundWinReason | ''
 }

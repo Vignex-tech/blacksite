@@ -149,3 +149,25 @@ export const CAN_HACK = Object.freeze({ ghost: true, warden: false })
 
 /** Terminal statuses, in room state. */
 export const TERMINAL_STATUSES = Object.freeze(['idle', 'hacking', 'hacked'])
+
+// The timed round (M7, #66). Meanings and conventions are documented in
+// protocol.d.ts. Nothing reads these until the server applies them (#68).
+// The server reads its settings once at startup from its own environment;
+// this file never touches `process` or `location`.
+
+/** Round phases, in order. */
+export const ROUND_PHASES = Object.freeze(['waiting', 'countdown', 'live', 'ended'])
+
+/** Why a round was won. */
+export const ROUND_WIN_REASONS = Object.freeze(['hacked', 'ghosts_eliminated', 'time_out'])
+
+/** Default round settings: timers in ms, finite and positive. */
+export const DEFAULT_ROUND_SETTINGS = Object.freeze({
+  countdownMs: 10000,
+  liveMs: 420000,
+  endedMs: 10000,
+  minPlayersPerTeam: 1,
+})
+
+/** Event the server sends to all clients on every phase change. Payload: RoundEvent. */
+export const ROUND_EVENT = 'round'
