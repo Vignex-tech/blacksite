@@ -94,3 +94,40 @@ export function terminalPlacement(id: string = ACTIVE_TERMINAL_ID): TerminalPlac
 
 /** Horizontal distance from `p` to `t` (what the server compares with HACK_RANGE). */
 export const distanceTo = (p: Point, t: Point): number => Math.hypot(p.x - t.x, p.z - t.z)
+
+/** One `hackProgress` message with the time it arrived (Date.now()). */
+export interface TimedProgress {
+  t: number
+  progress: number
+}
+
+/** Like `collectProgress`, with arrival times, for rate checks (#57). */
+export function collectProgressTimed(room: GameRoom): { samples: TimedProgress[] } {
+  const rec = { samples: [] as TimedProgress[] }
+  room.onMessage(HACK_PROGRESS_MESSAGE, (m: HackProgressMessage) => {
+    rec.samples.push({ t: Date.now(), progress: m.progress })
+  })
+  return rec
+}
+
+/**
+ * Watches terminal `id` (default the active one) on every state change of
+ * `room`: every status it ever showed, every alert value, and when `hacked`
+ * first arrived. Read it after the SDK clients have left (no expect() inside).
+ */
+export function watchTerminal(
+  room: GameRoom,
+  id: string = ACTIVE_TERMINAL_ID,
+): { statuses: Set<string>; alerts: Set<boolean>; hackedAt: number | null } {
+  const rec = { statuses: new Set<string>(), alerts: new Set<boolean>(), hackedAt: null as number | null }
+  const look = () => {
+    const t = terminalOf(room, id)
+    if (!t) return
+    rec.statuses.add(t.status)
+    rec.alerts.add(t.alert)
+    if (t.status === 'hacked' && rec.hackedAt === null) rec.hackedAt = Date.now()
+  }
+  room.onStateChange(look)
+  look()
+  return rec
+}
