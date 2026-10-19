@@ -1,5 +1,5 @@
 import { schema, t, type SchemaType } from "@colyseus/schema";
-import { MOVEMENT_MODES, TEAMS } from "../../../../shared/protocol.js";
+import { MOVEMENT_MODES, TEAMS, TERMINAL_STATUSES } from "../../../../shared/protocol.js";
 
 /**
  * One player. Field names match `PlayerState` in shared/protocol.d.ts.
@@ -24,6 +24,19 @@ export const Player = schema({
 export type Player = SchemaType<typeof Player>;
 
 /**
+ * One data terminal (M6, #56), keyed by terminal id. Sent to every client, so it
+ * holds nothing a Warden must not know: no hacker, no count, no position, no
+ * progress (progress is server-only and goes to Ghost clients as a message).
+ * `status` is one of TERMINAL_STATUSES; `alert` is set by #58 and stays false.
+ */
+export const Terminal = schema({
+  id: t.string().default(""),
+  status: t.string().default(TERMINAL_STATUSES[0]),
+  alert: t.boolean().default(false),
+});
+export type Terminal = SchemaType<typeof Terminal>;
+
+/**
  * Room state. Matches `GameRoomState`: `players` keyed by client.sessionId.
  *
  * Hidden information (#46, rule 2). `players` is tagged `.view()` (@colyseus/schema
@@ -38,5 +51,6 @@ export type Player = SchemaType<typeof Player>;
  */
 export const MyRoomState = schema({
   players: t.map(Player).view(),
+  terminals: t.map(Terminal),
 });
 export type MyRoomState = SchemaType<typeof MyRoomState>;

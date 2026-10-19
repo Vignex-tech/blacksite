@@ -10,6 +10,8 @@ import {
   FIRE_MESSAGE,
   FIRE_RATE_HZ,
   FRIENDLY_FIRE,
+  HACK_PROGRESS_MESSAGE,
+  INTERACT_MESSAGE,
   GROUND_SIZE,
   HIT_EVENT,
   MAX_HEALTH,
@@ -26,13 +28,14 @@ import {
   type MovementMode,
   type Team,
 } from "../../../shared/protocol.js";
-import { GRAYBOX_MAP, PLAYER_HALF_SIZE } from "../../../shared/map.js";
-import { MyRoomState, Player } from "./schema/MyRoomState.js";
+import { ACTIVE_TERMINAL_ID, GRAYBOX_MAP, PLAYER_HALF_SIZE } from "../../../shared/map.js";
+import { MyRoomState, Player, Terminal } from "./schema/MyRoomState.js";
 import { groundSolids } from "../rules/collision.js";
 import { moveBody, startJump, stepFall, supportHeight, type Body, type World } from "../rules/vertical.js";
 import { parseAction } from "../rules/actions.js";
 import { aimDirection, castRay, type Target } from "../rules/ballistics.js";
 import { parseFire } from "../rules/fire.js";
+import { advanceProgress, canHack, parseInteract } from "../rules/hacking.js";
 import { canSee } from "../rules/visibility.js";
 import { MANTLE_DISTANCE, climbMove, grab, letGo, mantle, shimmy, type ClimbBody } from "../rules/climbing.js";
 import { randomSpawnPoint } from "../rules/spawn.js";
@@ -94,6 +97,12 @@ export const SIM_RATE_HZ = 20;
 /** Action budget refill rate (actions per second), server-side only. */
 export const ACTION_RATE_HZ = 5;
 
+/** Interact budget refill rate (messages per second), server-side only. */
+export const INTERACT_RATE_HZ = 4;
+
+/** Interact budget capacity: at most this many valid interact messages back to back. */
+export const INTERACT_BURST = 2;
+
 /** Action budget capacity: at most this many actions back to back. */
 export const ACTION_BURST = 2;
 
@@ -111,6 +120,9 @@ const SOLIDS = groundSolids(MAP.solids);
 
 /** The map geometry for height-aware movement (rules/vertical.ts). */
 const WORLD: World = { solids: MAP.solids, floors: MAP.floors, ramps: MAP.ramps, bounds: MAP.bounds };
+
+/** The one terminal that can be hacked (Phase 1). */
+const ACTIVE_TERMINAL = MAP.terminals.find((term) => term.id === ACTIVE_TERMINAL_ID)!;
 
 /** Length of one simulation step, in ms and in seconds. */
 const SIM_STEP_MS = 1000 / SIM_RATE_HZ;
@@ -154,6 +166,21 @@ export class MyRoom extends Room<{ state: MyRoomState }> {
   /** Server-only fire/reload budgets by sessionId; never synchronized. */
   private fireBudgets = new Map<string, Budget>();
 
+  /** Server-only interact budgets by sessionId; never synchronized. */
+  private interactBudgets = new Map<string, Budget>();
+
+  /** Sessions currently hacking the active terminal; server-only, never synchronized (no hacker ids to Wardens). */
+  private hackers = new Set<string>();
+
+  /** Hack progress 0..1 of the active terminal; server-only, Ghost clients get it as a message. */
+  private progress = 0;
+
+  /** Server time (ms) up to which `progress` is settled. */
+  private progressAt: number | undefined;
+
+  /** Last progress sent to Ghost clients. */
+  private sentProgress = 0;
+
   /** Server-only time (ms, server clock) of each player's last accepted shot; never synchronized. */
   private lastShots = new Map<string, number>();
 
@@ -193,6 +220,62 @@ export class MyRoom extends Room<{ state: MyRoomState }> {
 
   private spendAction(sessionId: string): boolean {
     return spend(this.actionBudgets.get(sessionId), this.now(), ACTION_RATE_HZ, ACTION_BURST);
+  }
+
+  private spendInteract(sessionId: string): boolean {
+    return spend(this.interactBudgets.get(sessionId), this.now(), INTERACT_RATE_HZ, INTERACT_BURST);
+  }
+
+  /** Hack progress of the active terminal (0..1). Server-only; read by tests. */
+  get hackProgress(): number {
+    return this.progress;
+  }
+
+  /** Settles progress up to server time now with the current hackers (gain if any, else decay). */
+  private settleHack() {
+    const now = this.now();
+    const term = this.state.terminals.get(ACTIVE_TERMINAL_ID);
+    if (term && term.status !== "hacked") {
+      const dt = this.progressAt === undefined ? 0 : Math.max(0, now - this.progressAt);
+      this.progress = advanceProgress(this.progress, dt, this.hackers.size > 0);
+      if (this.progress >= 1) {
+        this.hackers.clear();
+        term.status = "hacked";
+      }
+    }
+    this.progressAt = now;
+  }
+
+  /** Sets the terminal status from the hacker set (hacked is final). */
+  private syncTerminal() {
+    const term = this.state.terminals.get(ACTIVE_TERMINAL_ID);
+    if (!term || term.status === "hacked") return;
+    const status = this.hackers.size > 0 ? "hacking" : "idle";
+    if (term.status !== status) term.status = status;
+  }
+
+  /** Sends progress to Ghost clients when it changed since the last send (Wardens never get it). */
+  private sendProgress(onlyTo?: Client) {
+    if (onlyTo) {
+      if (this.state.players.get(onlyTo.sessionId)?.team === "ghost") onlyTo.send(HACK_PROGRESS_MESSAGE, { progress: this.progress });
+      return;
+    }
+    if (this.progress === this.sentProgress) return;
+    this.sentProgress = this.progress;
+    for (const c of this.clients) {
+      if (this.state.players.get(c.sessionId)?.team === "ghost") c.send(HACK_PROGRESS_MESSAGE, { progress: this.progress });
+    }
+  }
+
+  /** Runs the hack for one step: drops hackers who can no longer hack, settles progress, updates status. */
+  private stepHack() {
+    this.hackers.forEach((id) => {
+      const p = this.state.players.get(id);
+      if (!p || !canHack(p, ACTIVE_TERMINAL)) this.hackers.delete(id);
+    });
+    this.settleHack();
+    this.syncTerminal();
+    this.sendProgress();
   }
 
   private spendFire(sessionId: string): boolean {
@@ -293,6 +376,7 @@ export class MyRoom extends Room<{ state: MyRoomState }> {
       stepFall(WORLD, body, SIM_STEP_S);
       this.storeBody(sessionId, player, body);
     });
+    this.stepHack();
     this.updateViews();
   }
 
@@ -313,6 +397,13 @@ export class MyRoom extends Room<{ state: MyRoomState }> {
   }
 
   onCreate() {
+    for (const term of MAP.terminals) {
+      const entry = new Terminal();
+      entry.id = term.id;
+      entry.status = "idle";
+      entry.alert = false;
+      this.state.terminals.set(term.id, entry);
+    }
     this.setSimulationInterval((dt) => {
       if (this.autoSimulate) this.simulate(dt);
     }, SIM_STEP_MS);
@@ -394,6 +485,25 @@ export class MyRoom extends Room<{ state: MyRoomState }> {
       if (player.reloading || player.ammo >= weapon.magazine) return;
       player.reloading = true;
       this.reloadEnds.set(client.sessionId, this.now() + weapon.reloadMs);
+    },
+
+    [INTERACT_MESSAGE]: (client: Client, message: unknown) => {
+      const player = this.state.players.get(client.sessionId);
+      if (!player || player.health <= 0) return;
+
+      const active = parseInteract(message);
+      if (active === null) return;
+      // Over budget: ignore. Refused starts still spend a token.
+      if (!this.spendInteract(client.sessionId)) return;
+
+      // Bring progress up to date before the hacker set changes.
+      this.settleHack();
+      if (!active) this.hackers.delete(client.sessionId);
+      else if (this.state.terminals.get(ACTIVE_TERMINAL_ID)?.status !== "hacked" && canHack(player, ACTIVE_TERMINAL)) {
+        this.hackers.add(client.sessionId);
+      }
+      this.syncTerminal();
+      this.sendProgress();
     },
 
     [FIRE_MESSAGE]: (client: Client, message: unknown) => {
@@ -488,11 +598,19 @@ export class MyRoom extends Room<{ state: MyRoomState }> {
     this.fireBudgets.set(client.sessionId, { tokens: FIRE_BURST, at: this.now() });
     this.moveBudgets.set(client.sessionId, { tokens: MOVE_BURST, at: this.now() });
     this.actionBudgets.set(client.sessionId, { tokens: ACTION_BURST, at: this.now() });
+    this.interactBudgets.set(client.sessionId, { tokens: INTERACT_BURST, at: this.now() });
     this.verticalSpeeds.set(client.sessionId, 0);
+    this.sendProgress(client);
     console.log(client.sessionId, "joined as", team);
   }
 
   onLeave(client: Client, code: CloseCode) {
+    if (this.hackers.has(client.sessionId)) {
+      this.settleHack();
+      this.hackers.delete(client.sessionId);
+      this.syncTerminal();
+    }
+    this.interactBudgets.delete(client.sessionId);
     this.state.players.delete(client.sessionId);
     client.view?.dispose();
     this.updateViews();
