@@ -1,4 +1,5 @@
 import { Room, Client, CloseCode } from "colyseus";
+import { StateView } from "@colyseus/schema";
 import {
   ACTION_MESSAGE,
   CAN_CLIMB,
@@ -32,6 +33,7 @@ import { moveBody, startJump, stepFall, supportHeight, type Body, type World } f
 import { parseAction } from "../rules/actions.js";
 import { aimDirection, castRay, type Target } from "../rules/ballistics.js";
 import { parseFire } from "../rules/fire.js";
+import { canSee } from "../rules/visibility.js";
 import { MANTLE_DISTANCE, climbMove, grab, letGo, mantle, shimmy, type ClimbBody } from "../rules/climbing.js";
 import { randomSpawnPoint } from "../rules/spawn.js";
 import { assignTeam } from "../rules/teams.js";
@@ -245,6 +247,30 @@ export class MyRoom extends Room<{ state: MyRoomState }> {
     }
   }
 
+  /**
+   * Recomputes, for every client, which players it is sent (#46): adds the
+   * ones it may see to its StateView and removes the rest, so a hidden Ghost
+   * is deleted from that client's state in the next patch. Cost per step at
+   * 4v4: 4 Wardens x 4 Ghosts x at most 7 ray tests = 112 tests (Ghost
+   * viewers and teammates need none).
+   */
+  private updateViews() {
+    const entries: Array<{ id: string; p: Player }> = [];
+    this.state.players.forEach((p, id) => entries.push({ id, p }));
+    for (const client of this.clients) {
+      const view = client.view;
+      const me = this.state.players.get(client.sessionId);
+      if (!view || !me) continue;
+      const viewer = { id: client.sessionId, team: me.team, x: me.x, y: me.y, z: me.z };
+      for (const { id, p } of entries) {
+        const visible = canSee(WORLD, viewer, { id, team: p.team, x: p.x, y: p.y, z: p.z });
+        const has = view.has(p);
+        if (visible && !has) view.add(p);
+        else if (!visible && has) view.remove(p);
+      }
+    }
+  }
+
   /** One fixed simulation step. */
   private step() {
     this.killedThisStep.clear();
@@ -267,6 +293,7 @@ export class MyRoom extends Room<{ state: MyRoomState }> {
       stepFall(WORLD, body, SIM_STEP_S);
       this.storeBody(sessionId, player, body);
     });
+    this.updateViews();
   }
 
   /**
@@ -456,6 +483,8 @@ export class MyRoom extends Room<{ state: MyRoomState }> {
     player.ammo = WEAPONS[team].magazine;
     player.reloading = false;
     this.state.players.set(client.sessionId, player);
+    client.view = new StateView();
+    this.updateViews();
     this.fireBudgets.set(client.sessionId, { tokens: FIRE_BURST, at: this.now() });
     this.moveBudgets.set(client.sessionId, { tokens: MOVE_BURST, at: this.now() });
     this.actionBudgets.set(client.sessionId, { tokens: ACTION_BURST, at: this.now() });
@@ -465,6 +494,8 @@ export class MyRoom extends Room<{ state: MyRoomState }> {
 
   onLeave(client: Client, code: CloseCode) {
     this.state.players.delete(client.sessionId);
+    client.view?.dispose();
+    this.updateViews();
     this.moveBudgets.delete(client.sessionId);
     this.actionBudgets.delete(client.sessionId);
     this.fireBudgets.delete(client.sessionId);

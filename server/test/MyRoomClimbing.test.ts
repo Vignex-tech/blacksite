@@ -66,7 +66,10 @@ describe("MyRoom climbing and hanging", () => {
   }
 
   it("a Ghost walks from the yard to climb-west, climbs, hangs from its ledge, mantles and stands on the upper level", async () => {
-    const { room, g, w, player, move, act, place } = await setup();
+    const { room, g, player, move, act, place } = await setup();
+    // A Warden is not sent a Ghost it cannot see (#46); a second Ghost watches the first.
+    const watcher = await colyseus.connectTo(room as any);
+    assert.strictEqual(room.state.players.get(watcher.sessionId)!.team, "ghost");
     const a = climbAnchor("climb-west");
     const l = ledge(a.ledgeId);
     place(g, -14, a.z);
@@ -83,7 +86,7 @@ describe("MyRoom climbing and hanging", () => {
     await act(g, { action: "climb", anchorId: "ledge-east-platform", x: 8, y: 3, z: 0 });
     assert.deepStrictEqual(snap(p), { x: a.x, y: 0, z: a.z, mode: "climbing", yaw: a.facing });
     await room.waitForNextPatch();
-    assert.strictEqual((w.state as any).players.get(g.sessionId).mode, "climbing");
+    assert.strictEqual((watcher.state as any).players.get(g.sessionId).mode, "climbing");
 
     // dz climbs at CLIMB_STEP per move; dx is ignored; yaw is still stored.
     await move(g, 1, 0, 0.3);

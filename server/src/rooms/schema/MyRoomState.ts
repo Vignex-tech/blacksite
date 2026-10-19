@@ -23,8 +23,20 @@ export const Player = schema({
 });
 export type Player = SchemaType<typeof Player>;
 
-/** Room state. Matches `GameRoomState`: `players` keyed by client.sessionId. */
+/**
+ * Room state. Matches `GameRoomState`: `players` keyed by client.sessionId.
+ *
+ * Hidden information (#46, rule 2). `players` is tagged `.view()` (@colyseus/schema
+ * 5 StateView): a client is sent a `players` entry only if that entry was added
+ * to the client's own `client.view`. MyRoom does this per client every
+ * simulation step (rules/visibility.ts): Ghost clients get everyone, a Warden
+ * client gets itself, its Wardens and the Ghosts it can see or is near. A Ghost
+ * that is not in a client's view is absent from that client's `players` map, so
+ * none of its fields (x, y, z, yaw, mode, health, ammo, reloading, key) are sent.
+ * Limits: the `players` map itself exists on every client (empty views get an
+ * empty map); a client with no `view` would receive nothing for `players`.
+ */
 export const MyRoomState = schema({
-  players: t.map(Player),
+  players: t.map(Player).view(),
 });
 export type MyRoomState = SchemaType<typeof MyRoomState>;
