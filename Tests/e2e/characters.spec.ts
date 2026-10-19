@@ -2,7 +2,7 @@ import { expect, test, type Page } from '@playwright/test'
 import { mkdirSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { closeTabs, get, holdKey, joined, local, lockPointer, snap, turnTo, type Tab } from './support/tabs.js'
+import { closeTabs, get, joined, local, lockPointer, snap, turnTo, type Tab } from './support/tabs.js'
 import { captureMoves } from './support/frames.js'
 import { hasLineOfSight, eyeOf } from './support/visibility.js'
 
@@ -92,23 +92,30 @@ test('character models: both teams load, stay readable and fit the draw-call bud
     await lockPointer(wt)
 
     // Place both on x = 3: the Warden strafes there, the Ghost enters by the south door (x = 0) and strafes.
-    const strafe = async (tab: Tab, target: number) => {
-      for (let i = 0; i < 6; i++) {
-        const x = local(await snap(tab.page)).x
-        if (Math.abs(x - target) <= 0.3) return
-        await holdKey(tab.page, target > x ? 'KeyD' : 'KeyA', Math.min(1500, Math.max(60, Math.abs(target - x) * 260)))
-        await sleep(150)
+    // Closed loop: hold the key until the hook shows the target (frame rate on
+    // CI's software GL at the high tier is low, so time-based holds undershoot).
+    const goTo = async (tab: Tab, axis: 'x' | 'z', target: number, keyUp: string, keyDown: string) => {
+      for (let attempt = 0; attempt < 4; attempt++) {
+        const cur = local(await snap(tab.page))[axis]
+        if (Math.abs(cur - target) <= 0.25) return
+        const key = target > cur ? keyUp : keyDown
+        await tab.page.keyboard.down(key)
+        try {
+          const started = Date.now()
+          while (Date.now() - started < 10_000) {
+            const v = local(await snap(tab.page))[axis]
+            if (key === keyUp ? v >= target - 0.1 : v <= target + 0.1) break
+            await sleep(30)
+          }
+        } finally {
+          await tab.page.keyboard.up(key)
+        }
+        await sleep(250)
       }
     }
-    // Camera yaw 0 faces +z (north): W walks north.
-    const walkNorthTo = async (tab: Tab, z: number) => {
-      for (let i = 0; i < 12; i++) {
-        const cur = local(await snap(tab.page)).z
-        if (cur >= z - 0.3) return
-        await holdKey(tab.page, 'KeyW', Math.min(1500, Math.max(80, (z - cur) * 260)))
-        await sleep(150)
-      }
-    }
+    // Camera yaw 0 faces +z (north): W walks north, D goes east.
+    const strafe = (tab: Tab, x: number) => goTo(tab, 'x', x, 'KeyD', 'KeyA')
+    const walkNorthTo = (tab: Tab, z: number) => goTo(tab, 'z', z, 'KeyW', 'KeyS')
     await strafe(wt, 3)
     await strafe(gt, 0)
     await walkNorthTo(gt, -5.5)
@@ -120,7 +127,7 @@ test('character models: both teams load, stay readable and fit the draw-call bud
       return { g: get(s, ghostId), w: get(s, wardenId) }
     }
     let { g, w } = await pos()
-    expect(Math.abs(g.x - w.x), 'both on x = 3').toBeLessThan(0.8)
+    expect(Math.abs(g.x - w.x), `both near x = 3: ghost ${g.x}, ${g.z}; warden ${w.x}, ${w.z}`).toBeLessThan(0.8)
 
     // The Ghost faces the Warden (it does already, both look north), the Warden faces the Ghost.
     await turnTo(wt, Math.atan2(g.x - w.x, g.z - w.z))
