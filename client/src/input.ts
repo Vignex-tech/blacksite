@@ -73,3 +73,56 @@ export class ActionInput {
     target.addEventListener('blur', () => this.held.clear())
   }
 }
+
+/** Fire and reload bindings by input (decision 15 on #38). One table, like ACTION_KEYS. */
+export const FIRE_BINDINGS = Object.freeze({
+  /** MouseEvent.button for fire: left mouse, hold to keep firing. */
+  fireButton: 0,
+  /** KeyboardEvent.code for reload: one `reload` per press. */
+  reloadKey: 'KeyR',
+})
+
+/**
+ * Left mouse fires while held; R reloads once per press. Both work only while
+ * `isActive()` is true (the caller says: pointer locked, not overhead, connected,
+ * not eliminated). The press that locks the pointer never fires: a mouse
+ * button counts as held only if it went down while active, and the lock itself
+ * happens on the click after that press. Ctrl, Meta and Alt combinations of R
+ * are ignored and not prevented. The caller polls `firing()` on its tick.
+ */
+export class FireInput {
+  private buttonHeld = false
+  private reloadHeld = false
+
+  private readonly isActive: () => boolean
+
+  constructor(isActive: () => boolean, onReload: () => void, target: Window = window) {
+    this.isActive = isActive
+    target.addEventListener('mousedown', (e) => {
+      if (e.button === FIRE_BINDINGS.fireButton && this.isActive()) this.buttonHeld = true
+    })
+    target.addEventListener('mouseup', (e) => {
+      if (e.button === FIRE_BINDINGS.fireButton) this.buttonHeld = false
+    })
+    target.addEventListener('keydown', (e) => {
+      if (e.code !== FIRE_BINDINGS.reloadKey || e.ctrlKey || e.metaKey || e.altKey) return
+      e.preventDefault()
+      if (e.repeat || this.reloadHeld) return
+      this.reloadHeld = true
+      if (this.isActive()) onReload()
+    })
+    target.addEventListener('keyup', (e) => {
+      if (e.code === FIRE_BINDINGS.reloadKey) this.reloadHeld = false
+    })
+    target.addEventListener('blur', () => {
+      this.buttonHeld = false
+      this.reloadHeld = false
+    })
+  }
+
+  /** True while the fire button is held and input is still active. */
+  firing(): boolean {
+    if (this.buttonHeld && !this.isActive()) this.buttonHeld = false // lock lost, died: must press again
+    return this.buttonHeld
+  }
+}

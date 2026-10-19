@@ -28,6 +28,8 @@ export interface TestHookRecorder {
   setMap(id: string, renderedSolids: number, traversal?: TraversalCounts): void
   /** Where snapshot() reads the camera from; until set, `camera` is absent. */
   setCamera(source: () => BlacksiteCameraSnapshot): void
+  /** Counts a received combat event (M5, #50). */
+  recordEvent(kind: 'shot' | 'hit' | 'kill' | 'damaged'): void
 }
 
 interface TraversalCounts {
@@ -61,6 +63,7 @@ export function installTestHook(target: Window = window): TestHookRecorder {
   let mapId: string | null = null
   let renderedSolids = 0
   let traversal: TraversalCounts = { renderedFloors: 0, renderedRamps: 0, renderedAnchors: 0 }
+  const events = { shots: 0, hits: 0, kills: 0, damaged: 0 }
   let cameraSource: (() => BlacksiteCameraSnapshot) | null = null
 
   const hook: BlacksiteTestHook = Object.freeze({
@@ -92,6 +95,7 @@ export function installTestHook(target: Window = window): TestHookRecorder {
           renderedRamps: traversal.renderedRamps,
           renderedAnchors: traversal.renderedAnchors,
         },
+        events: { ...events },
       }
       if (cameraSource) {
         const { mode, yaw } = cameraSource()
@@ -148,6 +152,12 @@ export function installTestHook(target: Window = window): TestHookRecorder {
         renderedRamps: counts?.renderedRamps ?? 0,
         renderedAnchors: counts?.renderedAnchors ?? 0,
       }
+    },
+    recordEvent(kind) {
+      if (kind === 'shot') events.shots++
+      else if (kind === 'hit') events.hits++
+      else if (kind === 'kill') events.kills++
+      else events.damaged++
     },
     setCamera(source) {
       cameraSource = source

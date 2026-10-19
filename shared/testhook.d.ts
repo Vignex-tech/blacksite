@@ -102,6 +102,15 @@ export interface BlacksiteSnapshot {
    * absent if WebGL failed to start.
    */
   camera?: BlacksiteCameraSnapshot
+  /**
+   * Counters of combat events this client received from the server (#50),
+   * since the page loaded. `shots` counts `shot` events (a Warden shot reaches
+   * everyone, a Ghost shot only Ghosts); `hits` counts `hit` events sent to
+   * the shooter (including kills); `kills` counts `hit` events with
+   * `killed: true`; `damaged` counts `damaged` events about this client's own
+   * player. Additive; always present.
+   */
+  events: { shots: number; hits: number; kills: number; damaged: number }
 }
 
 export interface BlacksiteTestHook {

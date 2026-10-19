@@ -1,11 +1,19 @@
 import { Callbacks, Client, type Room } from '@colyseus/sdk'
 import {
   ACTION_MESSAGE,
+  DAMAGED_EVENT,
+  FIRE_MESSAGE,
+  HIT_EVENT,
   MOVE_MESSAGE,
   MOVEMENT_MODES,
+  RELOAD_MESSAGE,
   ROOM_NAME,
+  SHOT_EVENT,
   TEAMS,
   type Action,
+  type DamagedEvent,
+  type HitEvent,
+  type ShotEvent,
   type MoveMessage,
   type MovementMode,
   type PlayerState,
@@ -114,6 +122,40 @@ export function sendMove(room: Room, move: MoveMessage): void {
 /** Sends one "action" message (one per key press). The server decides whether it does anything. */
 export function sendAction(room: Room, action: Action): void {
   room.send(ACTION_MESSAGE, { action })
+}
+
+/** Sends one "fire" message: aim only. `pitch` is on the wire convention (positive looks up). */
+export function sendFire(room: Room, yaw: number, pitch: number): void {
+  room.send(FIRE_MESSAGE, { yaw, pitch })
+}
+
+/** Sends one "reload" message. The server decides whether a reload starts. */
+export function sendReload(room: Room): void {
+  room.send(RELOAD_MESSAGE, {})
+}
+
+/** Handlers for the server events of M5. Payloads are checked before a handler runs. */
+export interface CombatHandlers {
+  onShot(e: ShotEvent): void
+  onHit(e: HitEvent): void
+  onDamaged(e: DamagedEvent): void
+}
+
+const isObj = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null
+const isPoint = (v: unknown): boolean =>
+  isObj(v) && [v.x, v.y, v.z].every((n) => typeof n === 'number' && Number.isFinite(n))
+
+/** Subscribes to shot, hit and damaged events; malformed payloads are dropped. */
+export function onCombatEvents(room: Room, h: CombatHandlers): void {
+  room.onMessage(SHOT_EVENT, (m: unknown) => {
+    if (isObj(m) && isPoint(m.origin) && isPoint(m.end)) h.onShot(m as unknown as ShotEvent)
+  })
+  room.onMessage(HIT_EVENT, (m: unknown) => {
+    if (isObj(m) && typeof m.killed === 'boolean') h.onHit(m as unknown as HitEvent)
+  })
+  room.onMessage(DAMAGED_EVENT, (m: unknown) => {
+    if (isObj(m) && typeof m.killed === 'boolean') h.onDamaged(m as unknown as DamagedEvent)
+  })
 }
 
 /** The subset of the SDK callbacks API used here, typed against the shared player shape. */

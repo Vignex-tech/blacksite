@@ -1,13 +1,15 @@
 import './style.css'
 import { createGameScene, type GameScene } from './scene.ts'
-import { ActionInput, MovementInput } from './input.ts'
-import { joinGame, sendAction, sendMove, type PlayerView } from './net.ts'
+import { ActionInput, FireInput, MovementInput } from './input.ts'
+import { joinGame, onCombatEvents, sendAction, sendFire, sendMove, sendReload, type PlayerView } from './net.ts'
 import { climbPrompt, modeText, type LocalPlayerState } from './traversalHint.ts'
 import type { Team } from '../../shared/protocol.js'
 import type { Room } from '@colyseus/sdk'
 import { installTestHook } from './testHook.ts'
 import { wrapAngle } from './cameras.ts'
-import { ammoText, crosshairVisible, healthText, type LocalVitals } from './vitals.ts'
+import { FirePacer } from './firePacer.ts'
+import { createCombatFeedback } from './combat.ts'
+import { ammoText, crosshairVisible, healthText, isEliminated, type LocalVitals } from './vitals.ts'
 
 /** How often a held movement key sends a "move" message. */
 const MOVE_SEND_HZ = 20
@@ -105,6 +107,22 @@ function start(view: GameScene): void {
     if (room) sendAction(room, action)
   })
 
+  // Fire (hold left mouse) and reload (R), only while the pointer is locked,
+  // in a team camera, connected and alive. The client sends aim only; the
+  // server decides ammo, cooldown and hits. Feedback comes from server events.
+  const combatActive = (): boolean =>
+    room !== null &&
+    rig.mode !== 'overhead' &&
+    document.pointerLockElement === canvas &&
+    vitals !== null &&
+    vitals.team !== null &&
+    !isEliminated(vitals.health)
+  const fireInput = new FireInput(combatActive, () => {
+    if (room) sendReload(room)
+  })
+  const pacer = new FirePacer()
+  const feedback = createCombatFeedback(view.scene, app)
+
   // One shared 20 Hz tick: held keys are camera-relative intent (strafe dx,
   // forward dz) sent with the camera yaw; with no key held, a yaw-only move
   // is sent only when the camera turned. The server decides the actual step.
@@ -116,6 +134,11 @@ function start(view: GameScene): void {
     showVitals()
     hint.textContent = rig.mode !== 'overhead' && !locked ? 'Click to look around (Esc releases the mouse)' : ''
     if (!room) return
+    if (fireInput.firing() && vitals && vitals.team && vitals.ammo > 0 && !vitals.reloading) {
+      if (pacer.due(performance.now(), vitals.team)) {
+        sendFire(room, rig.yaw, -rig.pitch) // camera pitch is positive down; the wire is positive up
+      }
+    }
     const keys = input.direction()
     if (rig.mode === 'overhead') {
       lastSentYaw = null
@@ -173,6 +196,21 @@ function start(view: GameScene): void {
       room = joined
       testHook.setConnected(joined.sessionId)
       showOnline()
+      onCombatEvents(joined, {
+        onShot: (e) => {
+          testHook.recordEvent('shot')
+          feedback.shot(e, joined.sessionId)
+        },
+        onHit: (e) => {
+          testHook.recordEvent(e.killed ? 'kill' : 'hit')
+          if (e.killed) testHook.recordEvent('hit')
+          feedback.hit(e)
+        },
+        onDamaged: (e) => {
+          testHook.recordEvent('damaged')
+          feedback.damaged(e)
+        },
+      })
       joined.onLeave(() => {
         room = null
         localTeam = null

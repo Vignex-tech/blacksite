@@ -51,6 +51,8 @@ export interface CameraRig {
   readonly mode: CameraMode
   /** Camera yaw in radians (wrapped to -pi..pi); 0 in overhead mode. */
   readonly yaw: number
+  /** Camera pitch in radians, local convention: positive looks DOWN. 0 in overhead mode. */
+  readonly pitch: number
   /**
    * Your own player as received from server state (`y` is its feet height,
    * 0 if omitted). The first call with a known team switches to that team's
@@ -135,6 +137,9 @@ export function createCameraRig(scene: Scene, canvas: HTMLCanvasElement, overhea
     },
     get yaw() {
       return yaw
+    },
+    get pitch() {
+      return mode === 'overhead' ? 0 : pitch
     },
     get localId() {
       return mode === 'overhead' ? null : localId
