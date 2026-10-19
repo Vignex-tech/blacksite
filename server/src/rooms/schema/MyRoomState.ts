@@ -16,6 +16,10 @@ export const Player = schema({
   yaw: t.number().default(0),
   y: t.number().default(0),
   mode: t.string().default(MOVEMENT_MODES[0]),
+  // Weapons and damage (M5, #41). Set on join from MAX_HEALTH and WEAPONS.
+  health: t.number().default(0),
+  ammo: t.number().default(0),
+  reloading: t.boolean().default(false),
 });
 export type Player = SchemaType<typeof Player>;
 
