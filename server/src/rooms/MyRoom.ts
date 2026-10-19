@@ -16,6 +16,7 @@ import {
   GROUND_SIZE,
   HIT_EVENT,
   MAX_HEALTH,
+  ROUND_EVENT,
   RELOAD_MESSAGE,
   SHOT_EVENT,
   WEAPONS,
@@ -30,7 +31,7 @@ import {
   type Team,
 } from "../../../shared/protocol.js";
 import { ACTIVE_TERMINAL_ID, GRAYBOX_MAP, PLAYER_HALF_SIZE } from "../../../shared/map.js";
-import { MyRoomState, Player, Terminal } from "./schema/MyRoomState.js";
+import { MyRoomState, Player, Round, Terminal } from "./schema/MyRoomState.js";
 import { groundSolids } from "../rules/collision.js";
 import { moveBody, startJump, stepFall, supportHeight, type Body, type World } from "../rules/vertical.js";
 import { parseAction } from "../rules/actions.js";
@@ -42,6 +43,16 @@ import { MANTLE_DISTANCE, climbMove, grab, letGo, mantle, shimmy, type ClimbBody
 import { randomSpawnPoint } from "../rules/spawn.js";
 import { assignTeam } from "../rules/teams.js";
 import { parseMove, worldStep } from "../rules/movement.js";
+import { advanceRound, newRoundMachine, presetWarning, roundSettingsFromEnv, secondsLeft, type RoundConfig } from "../rules/round.js";
+
+/**
+ * Round configuration, read ONCE from the server's own environment when this
+ * module loads (an unknown preset throws, so the server refuses to start).
+ * Never read from room options, join options or messages.
+ */
+const STARTUP_ROUND_CONFIG: RoundConfig = roundSettingsFromEnv(process.env);
+const STARTUP_WARNING = presetWarning(process.env);
+if (STARTUP_WARNING) console.warn(STARTUP_WARNING);
 
 /** Player half size on x and z, from the shared map contract (re-exported for Tests/). */
 export { PLAYER_HALF_SIZE };
@@ -218,6 +229,83 @@ export class MyRoom extends Room<{ state: MyRoomState }> {
    */
   autoSimulate = true;
 
+  /**
+   * Round settings (M7). From the server environment at startup; null is the
+   * `open` preset (live from creation, nothing ends). Tests assign it after
+   * create, like autoSimulate. Never set from options or messages.
+   */
+  roundSettings: RoundConfig = STARTUP_ROUND_CONFIG;
+
+  /** Server-only round machine; its public fields are mirrored into state.round. */
+  private roundMachine = newRoundMachine();
+
+  /** The settings the machine was last evaluated with (to notice a replaced config). */
+  private appliedRound: RoundConfig | undefined;
+
+  /** True while inputs are accepted: only in the live phase. */
+  private get inputsOpen(): boolean {
+    return this.state.round.phase === "live";
+  }
+
+  /** Whether a joiner must sit out: a timed round is live. */
+  private get roundIsLiveTimed(): boolean {
+    return this.roundSettings !== null && this.state.round.phase === "live";
+  }
+
+  /** Gives every connected player a fresh spawn and full health and ammo (start of a countdown). */
+  private resetPlayers() {
+    this.settleHack();
+    this.hackers.clear();
+    this.syncTerminal();
+    this.state.players.forEach((player, id) => {
+      const team = player.team as Team;
+      const spawn = randomSpawnPoint(MAP.spawnAreas[team], SOLIDS);
+      player.x = spawn.x;
+      player.z = spawn.z;
+      player.y = supportHeight(WORLD, spawn.x, spawn.z, STEP_HEIGHT);
+      player.yaw = SPAWN_YAW;
+      player.mode = "ground";
+      player.health = MAX_HEALTH[team];
+      player.ammo = WEAPONS[team].magazine;
+      player.reloading = false;
+      this.reloadEnds.delete(id);
+      this.lastShots.delete(id);
+      this.attachments.delete(id);
+      this.verticalSpeeds.set(id, 0);
+    });
+    this.sendProgress();
+  }
+
+  /** Runs the round machine at server time now and mirrors it into state. */
+  private updateRound() {
+    const now = this.now();
+    if (this.appliedRound !== this.roundSettings) {
+      // Settings were replaced (tests): start the machine afresh.
+      this.appliedRound = this.roundSettings;
+      this.roundMachine = newRoundMachine();
+    }
+    const counts = { ghost: 0, warden: 0 };
+    this.state.players.forEach((p) => { counts[p.team as Team] += 1; });
+    const wasLive = this.roundMachine.phase === "live";
+    const adv = advanceRound(this.roundMachine, this.roundSettings, now, counts);
+    const m = this.roundMachine;
+    if (wasLive && m.phase !== "live") {
+      // Round over or aborted: no hack carries on.
+      for (const id of [...this.hackers]) this.interruptHack(id);
+    }
+    if (adv.reset) this.resetPlayers();
+    const r = this.state.round;
+    if (r.phase !== m.phase) r.phase = m.phase;
+    if (r.roundNumber !== m.roundNumber) r.roundNumber = m.roundNumber;
+    if (r.winner !== m.winner) r.winner = m.winner;
+    if (r.winReason !== m.winReason) r.winReason = m.winReason;
+    const left = secondsLeft(m, now);
+    if (r.secondsLeft !== left) r.secondsLeft = left;
+    if (adv.phaseChanged) {
+      this.broadcast(ROUND_EVENT, { phase: m.phase, roundNumber: m.roundNumber, winner: m.winner, winReason: m.winReason });
+    }
+  }
+
   private spendMove(sessionId: string): boolean {
     return spend(this.moveBudgets.get(sessionId), this.now(), MOVE_RATE_HZ, MOVE_BURST);
   }
@@ -389,6 +477,7 @@ export class MyRoom extends Room<{ state: MyRoomState }> {
   /** One fixed simulation step. */
   private step() {
     this.killedThisStep.clear();
+    this.updateRound();
     // Finish reloads that are due (server clock). Eliminated players never reach here with a reload.
     const t = this.now();
     this.reloadEnds.forEach((end, id) => {
@@ -429,6 +518,8 @@ export class MyRoom extends Room<{ state: MyRoomState }> {
   }
 
   onCreate() {
+    this.state.round = new Round();
+    this.updateRound();
     for (const term of MAP.terminals) {
       const entry = new Terminal();
       entry.id = term.id;
@@ -444,7 +535,7 @@ export class MyRoom extends Room<{ state: MyRoomState }> {
   messages = {
     [MOVE_MESSAGE]: (client: Client, message: unknown) => {
       const player = this.state.players.get(client.sessionId);
-      if (!player || player.health <= 0) return;
+      if (!player || player.health <= 0 || !this.inputsOpen) return;
 
       const move = parseMove(message);
       if (!move) return;
@@ -479,7 +570,7 @@ export class MyRoom extends Room<{ state: MyRoomState }> {
 
     [ACTION_MESSAGE]: (client: Client, message: unknown) => {
       const player = this.state.players.get(client.sessionId);
-      if (!player || player.health <= 0) return;
+      if (!player || player.health <= 0 || !this.inputsOpen) return;
 
       const action = parseAction(message);
       if (!action) return;
@@ -518,7 +609,7 @@ export class MyRoom extends Room<{ state: MyRoomState }> {
 
     [RELOAD_MESSAGE]: (client: Client, message: unknown) => {
       const player = this.state.players.get(client.sessionId);
-      if (!player || player.health <= 0) return;
+      if (!player || player.health <= 0 || !this.inputsOpen) return;
       if (typeof message !== "object" || message === null || Array.isArray(message)) return;
       // Shares the fire bucket. Refused reloads still spend a token.
       if (!this.spendFire(client.sessionId)) return;
@@ -531,7 +622,7 @@ export class MyRoom extends Room<{ state: MyRoomState }> {
 
     [INTERACT_MESSAGE]: (client: Client, message: unknown) => {
       const player = this.state.players.get(client.sessionId);
-      if (!player || player.health <= 0) return;
+      if (!player || player.health <= 0 || !this.inputsOpen) return;
 
       const active = parseInteract(message);
       if (active === null) return;
@@ -550,7 +641,7 @@ export class MyRoom extends Room<{ state: MyRoomState }> {
 
     [FIRE_MESSAGE]: (client: Client, message: unknown) => {
       const player = this.state.players.get(client.sessionId);
-      if (!player || player.health <= 0) return;
+      if (!player || player.health <= 0 || !this.inputsOpen) return;
 
       const aim = parseFire(message);
       if (!aim) return;
@@ -633,7 +724,8 @@ export class MyRoom extends Room<{ state: MyRoomState }> {
     // Standing on the surface under the spawn point (the ground today).
     player.y = supportHeight(WORLD, spawn.x, spawn.z, STEP_HEIGHT);
     player.mode = "ground";
-    player.health = MAX_HEALTH[team];
+    // Joining a live timed round: sit out (eliminated) until the next reset.
+    player.health = this.roundIsLiveTimed ? 0 : MAX_HEALTH[team];
     player.ammo = WEAPONS[team].magazine;
     player.reloading = false;
     this.state.players.set(client.sessionId, player);
@@ -645,6 +737,7 @@ export class MyRoom extends Room<{ state: MyRoomState }> {
     this.interactBudgets.set(client.sessionId, { tokens: INTERACT_BURST, at: this.now() });
     this.verticalSpeeds.set(client.sessionId, 0);
     this.sendProgress(client);
+    this.updateRound();
     console.log(client.sessionId, "joined as", team);
   }
 
@@ -666,6 +759,7 @@ export class MyRoom extends Room<{ state: MyRoomState }> {
     this.killedThisStep.delete(client.sessionId);
     this.verticalSpeeds.delete(client.sessionId);
     this.attachments.delete(client.sessionId);
+    this.updateRound();
     console.log(client.sessionId, "left!", code);
   }
 

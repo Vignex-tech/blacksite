@@ -37,6 +37,19 @@ export const Terminal = schema({
 export type Terminal = SchemaType<typeof Terminal>;
 
 /**
+ * Round phase, timer and result (M7, #68). Public to every client, identical
+ * for both teams; fields match `RoundState` in shared/protocol.d.ts.
+ */
+export const Round = schema({
+  phase: t.string().default("waiting"),
+  roundNumber: t.number().default(0),
+  secondsLeft: t.number().default(0),
+  winner: t.string().default(""),
+  winReason: t.string().default(""),
+});
+export type Round = SchemaType<typeof Round>;
+
+/**
  * Room state. Matches `GameRoomState`: `players` keyed by client.sessionId.
  *
  * Hidden information (#46, rule 2). `players` is tagged `.view()` (@colyseus/schema
@@ -52,5 +65,6 @@ export type Terminal = SchemaType<typeof Terminal>;
 export const MyRoomState = schema({
   players: t.map(Player).view(),
   terminals: t.map(Terminal),
+  round: t.ref(Round),
 });
 export type MyRoomState = SchemaType<typeof MyRoomState>;
