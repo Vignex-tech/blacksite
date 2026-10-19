@@ -63,7 +63,47 @@ jobs:
         working-directory: Tests
         run: npm run test:unit
 
+
+  # The e2e suite runs as three parallel shards, each with its own built server
+  # (#65). Wall time is the slowest shard. Shards are defined in
+  # Tests/scripts/e2e-shard.mjs; every spec belongs to exactly one.
+  e2e:
+    name: e2e (${{ matrix.shard }})
+    runs-on: ubuntu-latest
+    env:
+      CI: true
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [integration, browser-a, browser-b]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node 24
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: |
+            client/package-lock.json
+            server/package-lock.json
+            Tests/package-lock.json
+
+      - name: Client - install and build
+        working-directory: client
+        run: npm ci && npm run build
+
+      - name: Server - install and build
+        working-directory: server
+        run: npm ci && npm run build
+
+      - name: Tests - install
+        working-directory: Tests
+        run: npm ci
+
       - name: Tests - install Playwright Chromium
+        if: matrix.shard != 'integration'
         working-directory: Tests
         run: npx playwright install --with-deps chromium
 
@@ -71,29 +111,37 @@ jobs:
       # client/dist on port 2567, so both builds above must run first.
       - name: Tests - e2e (Playwright, against the real server)
         working-directory: Tests
-        run: npm run test:e2e
+        run: npm run test:e2e:shard -- ${{ matrix.shard }}
 
-      # Screenshots from e2e/map.spec.ts, for a human to look at: the whole map
-      # from the overhead camera (graybox-map.png) and the ghost's third-person
-      # and the warden's first-person views (#25), and from e2e/upper-level.spec.ts
-      # the warden's view of a ghost hanging from a ledge and of a warden on the
-      # upper level above the stairs (#34), and from e2e/m4-gate.spec.ts the
-      # ghost's third-person view while hanging from ledge-west-wall (#36).
-      # Uploaded on every run; no test compares their pixels.
-      - name: Upload map screenshot
+      # Screenshots from e2e/map.spec.ts, m4-gate.spec.ts and upper-level.spec.ts,
+      # for a human to look at; no test compares their pixels.
+      - name: Upload screenshots
         if: ${{ !cancelled() }}
         uses: actions/upload-artifact@v4
         with:
-          name: graybox-map-screenshot
+          name: screenshots-${{ matrix.shard }}
           path: Tests/Reports/
-          if-no-files-found: warn
+          if-no-files-found: ignore
           retention-days: 30
 
       - name: Upload Playwright report
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: playwright-report
+          name: playwright-report-${{ matrix.shard }}
           path: Tests/playwright-report
           if-no-files-found: ignore
           retention-days: 14
+
+  # The one required check: fails if the checks job or any e2e shard failed,
+  # was cancelled or was skipped.
+  build-and-test:
+    name: build-and-test
+    runs-on: ubuntu-latest
+    needs: [checks, e2e]
+    if: ${{ always() }}
+    steps:
+      - name: All jobs succeeded
+        run: |
+          echo "checks: ${{ needs.checks.result }}, e2e: ${{ needs.e2e.result }}"
+          test "${{ needs.checks.result }}" = success && test "${{ needs.e2e.result }}" = success

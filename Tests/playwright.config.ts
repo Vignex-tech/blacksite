@@ -1,3 +1,16 @@
+// E2E TIME BUDGET (#65, milestone 7)
+// - Before #65: the CI "Tests - e2e" step took 4.8 min (about 5 min locally),
+//   because the chromium project is serial (shared my_room) and ran after the
+//   SDK specs on one machine.
+// - Now: the same 68 tests run as three parallel CI jobs (shards, see
+//   scripts/e2e-shard.mjs and .github/workflows/ci.yml): server-integration
+//   (4 workers), browser-a and browser-b (about 100 s of serial tab time
+//   each). The slowest shard is the wall time; target <= 3.3 min.
+// - Hard ceiling at the M7 gate: 4.0 min for the slowest shard.
+// - Rule: a new spec states its added wall time in its closing comment, and
+//   says which shard it runs in (a new browser spec lands in browser-b unless
+//   listed in BROWSER_A in scripts/e2e-shard.mjs).
+// - The workers and projects below still apply to a plain "npm run test:e2e".
 import { defineConfig, devices } from '@playwright/test'
 
 // The real Colyseus server (server/build) serves client/dist on this port, so
