@@ -28,9 +28,9 @@ export const TILE_METRES = 2
 /** Perimeter wall: height and thickness (it stands just outside the bounds). */
 export const PERIMETER_HEIGHT = 1.4
 export const PERIMETER_THICKNESS = 0.5
-/** The apron extends the ground this far past the bounds, just under it. */
+/** The apron extends the ground this far past the bounds, as a ring around the ground. */
 export const APRON_MARGIN = 80
-const APRON_Y = -0.03
+const APRON_Y = 0
 
 /**
  * Rewrites a mesh's UVs as world-space coordinates, one unit per tile, using
@@ -114,12 +114,30 @@ export function buildPerimeter(scene: Scene, map: GrayboxMap = GRAYBOX_MAP): Ren
   applyWorldUVs(perimeter, 3)
   perimeter.freezeWorldMatrix()
 
-  const apron = CreateGround(
-    'decor-apron',
-    { width: maxX - minX + 2 * APRON_MARGIN, height: maxZ - minZ + 2 * APRON_MARGIN },
-    scene,
-  )
-  apron.position.set((minX + maxX) / 2, APRON_Y, (minZ + maxZ) / 2)
+  // A ring of four strips around the bounds (not one plane under the ground,
+  // which would draw every ground pixel twice).
+  const m = APRON_MARGIN
+  const cx = (minX + maxX) / 2
+  const cz = (minZ + maxZ) / 2
+  const strip = (name: string, width: number, height: number, x: number, z: number): Mesh => {
+    const g = CreateGround(name, { width, height }, scene)
+    g.position.set(x, 0, z)
+    g.bakeCurrentTransformIntoVertices()
+    return g
+  }
+  const fullW = maxX - minX + 2 * m
+  const apron = Mesh.MergeMeshes(
+    [
+      strip('decor-apron-s', fullW, m, cx, minZ - m / 2),
+      strip('decor-apron-n', fullW, m, cx, maxZ + m / 2),
+      strip('decor-apron-w', m, maxZ - minZ, minX - m / 2, cz),
+      strip('decor-apron-e', m, maxZ - minZ, maxX + m / 2, cz),
+    ],
+    true,
+    true,
+  ) as Mesh
+  apron.name = 'decor-apron'
+  apron.position.y = APRON_Y
   apron.material = flatMaterial(scene, 'ground')
   apron.isPickable = false
   apron.checkCollisions = false
@@ -152,7 +170,7 @@ export function texturizeSurfaces(scene: Scene, gfx: GfxSettings, hooks?: Surfac
 
   const pbr = gfx.tier !== 'low'
   const maps = pbr ? (['albedo', 'normal', 'orm'] as const) : (['albedo'] as const)
-  const kinds = Object.keys(SURFACE_STYLE) as SurfaceKind[]
+  const kinds = (Object.keys(SURFACE_STYLE) as SurfaceKind[]).filter(() => true)
   const total = kinds.length * maps.length
   let done = 0
   const load = hooks?.begin()
