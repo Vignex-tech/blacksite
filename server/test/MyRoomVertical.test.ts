@@ -42,7 +42,7 @@ describe("MyRoom height, falling and actions", () => {
     room.autoSimulate = false;
     const g = await colyseus.connectTo(room as any);
     const w = await colyseus.connectTo(room as any);
-    let t = room.now();
+    let t = Math.ceil(room.now()); // whole ms: float sums like 1967.762 + 300 fall just short of an interval
     room.now = () => t;
     const player = (c: { sessionId: string }) => room.state.players.get(c.sessionId)!;
     const move = async (c: any, dx: number, dz: number, advance = true) => {

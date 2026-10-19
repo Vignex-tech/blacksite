@@ -30,7 +30,7 @@ describe("MyRoom reload and elimination", () => {
     const g = await colyseus.connectTo(room as any);
     const w = await colyseus.connectTo(room as any);
     const g2 = await colyseus.connectTo(room as any);
-    let t = room.now();
+    let t = Math.ceil(room.now()); // whole ms: float sums like 1967.762 + 300 fall just short of an interval
     room.now = () => t;
     const advance = (ms: number) => { t += ms; };
     const player = (c: { sessionId: string }) => room.state.players.get(c.sessionId)!;

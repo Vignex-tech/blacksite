@@ -80,7 +80,8 @@ describe("MyRoom", () => {
 
     await room.waitForNextPatch();
     // Synced numbers travel as float32 on the wire, so compare loosely.
-    assert.ok(Math.abs(b.state.players.get(a.sessionId).x - a1.x) < 1e-4);
+    // Read from the mover's own view: a Warden client is not sent a Ghost it cannot see (#46).
+    assert.ok(Math.abs(a.state.players.get(a.sessionId).x - a1.x) < 1e-4);
   });
 
   it("ignores invalid move payloads", async () => {
@@ -139,7 +140,7 @@ describe("MyRoom", () => {
 
   /** Replaces the room's clock with a manual one, starting at the current time. */
   function controlTime(room: MyRoom) {
-    let t = room.now();
+    let t = Math.ceil(room.now()); // whole ms: float sums like 1967.762 + 300 fall just short of an interval
     room.now = () => t;
     return (ms: number) => { t += ms; };
   }
@@ -225,7 +226,7 @@ describe("MyRoom", () => {
     async function setup() {
       const room = (await colyseus.createRoom<MyRoom>(ROOM_NAME, {})) as any;
       const client = await colyseus.connectTo(room);
-      let t = room.now();
+      let t = Math.ceil(room.now()); // whole ms: float sums like 1967.762 + 300 fall just short of an interval
       room.now = () => t;
       const player = room.state.players.get(client.sessionId);
       const move = async (dx: number, dz: number, times = 1) => {

@@ -98,7 +98,9 @@ describe("MyRoom teams", () => {
     const b = await colyseus.connectTo(room);
     await room.waitForNextPatch();
     assert.strictEqual(a.state.players.get(b.sessionId)?.team, "warden");
-    assert.strictEqual(b.state.players.get(a.sessionId)?.team, "ghost");
+    // A Warden client is not sent an unseen Ghost (#46); it reads its own entry instead.
+    assert.strictEqual(a.state.players.get(a.sessionId)?.team, "ghost");
+    assert.strictEqual(b.state.players.get(b.sessionId)?.team, "warden");
     assert.strictEqual(a.state.players.get(b.sessionId)?.yaw, 0);
   });
 

@@ -110,7 +110,7 @@ describe("MyRoom camera-relative movement", () => {
     const room = (await colyseus.createRoom<MyRoom>(ROOM_NAME, {})) as any;
     const g = await colyseus.connectTo(room);
     const w = await colyseus.connectTo(room);
-    let t = room.now();
+    let t = Math.ceil(room.now()); // whole ms: float sums like 1967.762 + 300 fall just short of an interval
     room.now = () => t;
     const player = (c: { sessionId: string }) => (room as MyRoom).state.players.get(c.sessionId)!;
     /** Sends one move, advancing the clock by `ms` first (one rate step by default). */
