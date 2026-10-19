@@ -1,0 +1,11 @@
+Source: ambientCG (PBR materials)
+Author: Lennart Demes and ambientCG contributors (per asset page)
+Licence: Creative Commons CC0 1.0 Universal
+Licence URL: https://docs.ambientcg.com/license/ (links to https://creativecommons.org/publicdomain/zero/1.0/)
+Date checked: 2026-10-20
+Text read on the official page: "All ambientCG assets are provided under the Creative Commons CC0 1.0 Universal License." Permissions: "You can copy, modify, distribute and perform the assets, even for commercial purposes, all without asking permission." Credit is not required.
+Suggested credit text (optional): "Created using <asset name> from ambientCG.com, licensed under the Creative Commons CC0 1.0 Universal License."
+Assets planned: see Manifests/assets.json (Concrete034, Concrete037, PaintedPlaster012, Concrete033, PaintedMetal005, Metal038, Rust004, Metal027, DiamondPlate008A, Asphalt033).
+
+--- Copy of the licence text shipped inside the download (verbatim) ---
+(The page links to the full CC0 text at https://creativecommons.org/publicdomain/zero/1.0/legalcode ; the page itself does not reproduce it.)

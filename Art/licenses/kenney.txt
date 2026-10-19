@@ -1,0 +1,10 @@
+Source: Kenney (kenney.nl)
+Author: Kenney
+Licence: CC0 (public domain)
+Page URL: https://kenney.nl/support
+Date checked: 2026-10-20
+Text read on the official page: "all game assets on the asset pages are public domain licensed (CC0)"; "You're free to use them, even in commercial projects"; attribution is optional; the Kenney logo is reserved and must not be used.
+Status: NOT USED yet. Listed as the first gap filler for props (server rack, fence, ladder strip). Each pack must be re-checked on its own page at the time it is chosen.
+
+--- Copy of the licence text shipped inside the download (verbatim) ---
+(Full CC0 text: https://creativecommons.org/publicdomain/zero/1.0/legalcode)

@@ -1,0 +1,13 @@
+{
+  "name": "blacksite-art",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Art pipeline tooling for Blacksite. Not installed by CI; run `npm install` in Art/ only when rebuilding assets.",
+  "type": "module",
+  "scripts": {
+    "inspect": "gltf-transform inspect"
+  },
+  "devDependencies": {
+    "@gltf-transform/cli": "4.1.1"
+  }
+}

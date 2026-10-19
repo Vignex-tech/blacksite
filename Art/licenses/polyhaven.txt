@@ -1,0 +1,11 @@
+Source: Poly Haven (optional night HDRI for reflections)
+Author: Greg Zaal (original) and Jarod Guest (sky edits) for kloppenheim_02_puresky
+Licence: CC0
+Licence URL: https://polyhaven.com/license
+Page URL: https://polyhaven.com/a/kloppenheim_02_puresky
+Date checked: 2026-10-20
+Text read on the official page: "Our assets are all licensed as CC0" and "You do not need to give credit".
+Use: optional. Only a heavily downscaled, prefiltered environment texture may ship; the 1k source HDR is 1.4 MB and is not shipped as is.
+
+--- Copy of the licence text shipped inside the download (verbatim) ---
+(Full CC0 text: https://creativecommons.org/publicdomain/zero/1.0/legalcode)

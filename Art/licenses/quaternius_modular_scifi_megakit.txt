@@ -1,0 +1,32 @@
+Source: Modular SciFi MegaKit (Standard, free edition)
+Author: Quaternius (@Quaternius)
+Licence: CC0 1.0 Universal (public domain dedication)
+Licence URL: https://creativecommons.org/publicdomain/zero/1.0/
+Page URLs: https://quaternius.com/packs/modularscifimegakit.html , https://quaternius.itch.io/modular-sci-fi-megakit
+Date checked: 2026-10-20 (licence text shipped in the download read; the Quaternius FAQ says all models are CC0)
+Files used: small props only (computer console, lights, rails, vents, crates, barrel, cable, fan). Pieces named Decal_Logo*, Decal_Sign, Decal_XSign and the Astra wall/column/top families are NOT used (logo and brand-looking text risk).
+Attribution: not required.
+
+--- Copy of the licence text shipped inside the download (verbatim) ---
+This is the standard FREE version of the Modular SciFi MegaKit, which only contains 
+a portion of the models . You can buy the PRO version which has all the models,
+or the SOURCE version which has all the models and also includes Unity(URP), Unreal Engine and Godot projects
+with custom shaders already set up.
+
+You can get the other versions from the website https://quaternius.com
+
+-------------------------------------------------------
+License:
+CC0 1.0 Universal (CC0 1.0) 
+Public Domain Dedication
+https://creativecommons.org/publicdomain/zero/1.0/
+
+------------------------------------------------------
+Models by @Quaternius
+Consider supporting me on Patreon!
+
+https://www.patreon.com/quaternius
+
+-------------------------------------------------------
+Join the Discord Server:
+https://discord.gg/vJqnRUYRfT
