@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { GRAYBOX_MAP, PLAYER_HALF_SIZE, PLAYER_HEIGHT, UPPER_LEVEL_Y, type GrayboxMap } from '../../shared/map.js'
-import { ANCHOR_REACH, GRAVITY, GROUND_SIZE, JUMP_SPEED, STEP_HEIGHT, TEAMS } from '../../shared/protocol.js'
+import { ACTIVE_TERMINAL_ID, GRAYBOX_MAP, PLAYER_HALF_SIZE, PLAYER_HEIGHT, UPPER_LEVEL_Y, type GrayboxMap } from '../../shared/map.js'
+import { ANCHOR_REACH, GRAVITY, GROUND_SIZE, HACK_RANGE, JUMP_SPEED, STEP_HEIGHT, TEAMS } from '../../shared/protocol.js'
 import {
   allViolations,
   building,
@@ -9,6 +9,7 @@ import {
   checkIds,
   checkSolidShapes,
   checkSpawnAreas,
+  checkActiveTerminal,
   checkTerminals,
   checkWithinBounds,
   grow,
@@ -81,6 +82,11 @@ describe('GRAYBOX_MAP contract (shared/map.js)', () => {
   it('6. exactly two terminals, each clear for a player box and inside the building', () => {
     expect(GRAYBOX_MAP.terminals).toHaveLength(2)
     expect(checkTerminals(GRAYBOX_MAP, LIMITS)).toEqual([])
+  })
+
+  it('17. ACTIVE_TERMINAL_ID names an existing terminal, with ground to stand on within HACK_RANGE (M6, #55)', () => {
+    expect(GRAYBOX_MAP.terminals.map((t) => t.id)).toContain(ACTIVE_TERMINAL_ID)
+    expect(checkActiveTerminal(GRAYBOX_MAP, LIMITS, ACTIVE_TERMINAL_ID, HACK_RANGE)).toEqual([])
   })
 
   it('7. ids are unique within each list', () => {
@@ -169,6 +175,23 @@ describe('GRAYBOX_MAP contract (shared/map.js)', () => {
 describe('map invariant checks catch broken maps', () => {
   it('passes the real map with no violations at all', () => {
     expect(allViolations(GRAYBOX_MAP, LIMITS)).toEqual([])
+  })
+
+  // Invariant 17 (M6, #55): the check must fail on a bad active id and on a hack circle with no room.
+  it('flags: an active terminal id that is not a terminal', () => {
+    expect(checkActiveTerminal(GRAYBOX_MAP, LIMITS, 'terminal-z', HACK_RANGE).join()).toMatch(/not a terminal of the map/)
+  })
+
+  it('flags: an active terminal boxed in by cover (no free ground within range)', () => {
+    const m = copy()
+    const t = m.terminals[0]
+    // A big cover block around the terminal, thick enough to cover the whole ring.
+    m.solids.push({ id: 'cover-box', kind: 'cover', min: { x: t.x - 4, y: 0, z: t.z - 4 }, max: { x: t.x + 4, y: 1.2, z: t.z + 4 } })
+    expect(checkActiveTerminal(m, LIMITS, 'terminal-a', HACK_RANGE).join()).toMatch(/no free ground/)
+  })
+
+  it('flags: a non-positive hack range', () => {
+    expect(checkActiveTerminal(GRAYBOX_MAP, LIMITS, 'terminal-a', 0).join()).toMatch(/not positive/)
   })
 
   const cases: [string, (m: Mutable<GrayboxMap>) => void, RegExp][] = [

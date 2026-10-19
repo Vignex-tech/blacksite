@@ -19,6 +19,13 @@ describe('move frame decoder', () => {
     expect(m?.payload).toEqual({ dx: 0, dz: 1, yaw: 0.25000000000000355 })
   })
 
+  it('decodes the interact messages the client will send (M6, #55): { active: true } and { active: false }', () => {
+    // 0d, "interact" (fixstr 8), plain fixmap of one key "active", then true / false.
+    const head = '0da8696e746572616374' + '81a6616374697665'
+    expect(decodeRoomMessage(hex(head + 'c3'))).toEqual({ type: 'interact', payload: { active: true } })
+    expect(decodeRoomMessage(hex(head + 'c2'))).toEqual({ type: 'interact', payload: { active: false } })
+  })
+
   it('ignores frames that are not room messages (the join handshake)', () => {
     expect(decodeRoomMessage(hex('0a'))).toBeNull()
     expect(decodeRoomMessage(new Uint8Array())).toBeNull()

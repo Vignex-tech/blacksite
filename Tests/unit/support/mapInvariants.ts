@@ -254,6 +254,32 @@ export function checkTerminals(map: GrayboxMap, limits: MapLimits): string[] {
   return out
 }
 
+/**
+ * 17. (M6, #54) `activeId` names an existing terminal, and its hack circle
+ * (player centre within `range` of it) has room to stand on: some point on
+ * the ring at 0.9 * range is clear of ground volumes and inside the bounds.
+ */
+export function checkActiveTerminal(map: GrayboxMap, limits: MapLimits, activeId: string, range: number): string[] {
+  const t = map.terminals.find((v) => v.id === activeId)
+  if (!t) return [`active terminal ${JSON.stringify(activeId)} is not a terminal of the map`]
+  const out: string[] = []
+  if (!(range > 0)) out.push(`hack range ${range} is not positive`)
+  const vols = groundVolumes(map, limits)
+  const b = map.bounds
+  let free = 0
+  for (let k = 0; k < 16; k++) {
+    const a = (k / 16) * 2 * Math.PI
+    const x = t.x + Math.cos(a) * range * 0.9
+    const z = t.z + Math.sin(a) * range * 0.9
+    const h = limits.playerHalfSize
+    if (x - h < b.minX || x + h > b.maxX || z - h < b.minZ || z + h > b.maxZ) continue
+    const box = playerBox(x, z, h)
+    if (!vols.some((v) => rectsOverlap(box, v.rect))) free++
+  }
+  if (free === 0) out.push(`no free ground within ${range} of active terminal ${activeId}`)
+  return out
+}
+
 /** 7. Ids are unique within each list (and non-empty). 15. The same for anchors, floors and ramps. */
 export function checkIds(map: GrayboxMap): string[] {
   const out: string[] = []

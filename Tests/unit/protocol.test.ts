@@ -6,7 +6,15 @@ import {
   ANCHOR_REACH,
   CAN_CLIMB,
   CLIMB_SPEED,
+  CAN_HACK,
   GRAVITY,
+  HACK_ALERT_AFTER_MS,
+  HACK_DECAY_RATIO,
+  HACK_DURATION_MS,
+  HACK_PROGRESS_MESSAGE,
+  HACK_RANGE,
+  INTERACT_MESSAGE,
+  TERMINAL_STATUSES,
   JUMP_SPEED,
   MAX_FALL_SPEED,
   MAX_TEAM_SIZE,
@@ -17,7 +25,7 @@ import {
   TEAMS,
   TEAM_SPEED,
 } from '../../shared/protocol.js'
-import { GRAYBOX_MAP } from '../../shared/map.js'
+import { ACTIVE_TERMINAL_ID, GRAYBOX_MAP } from '../../shared/map.js'
 import { allowedSteps, clampIntent, isTeam, teamStep, worldStep, yawOf } from '../e2e/support/intent.ts'
 
 // #18's team contract (shared/protocol.js), checked in #19, and the e2e
@@ -209,5 +217,45 @@ describe('vertical movement contract (#27)', () => {
   it('a climb or shimmy step per tick (speed / 20) is at most 0.5', () => {
     expect(CLIMB_SPEED / TICK_HZ).toBeLessThanOrEqual(0.5)
     expect(SHIMMY_SPEED / TICK_HZ).toBeLessThanOrEqual(0.5)
+  })
+})
+
+// M6 hacking contract (#54), checked in #55.
+describe('hacking contract (shared/protocol.js, #54)', () => {
+  it('message names are the documented strings and differ from the others', () => {
+    expect(INTERACT_MESSAGE).toBe('interact')
+    expect(HACK_PROGRESS_MESSAGE).toBe('hackProgress')
+    expect(new Set([MOVE_MESSAGE, ACTION_MESSAGE, INTERACT_MESSAGE, HACK_PROGRESS_MESSAGE]).size).toBe(4)
+  })
+
+  it('CAN_HACK is frozen, Ghost only, one boolean per team', () => {
+    expect(Object.isFrozen(CAN_HACK)).toBe(true)
+    expect(Object.keys(CAN_HACK).sort()).toEqual([...TEAMS].sort())
+    expect(CAN_HACK).toEqual({ ghost: true, warden: false })
+  })
+
+  it('TERMINAL_STATUSES is frozen: idle, hacking, hacked', () => {
+    expect(Object.isFrozen(TERMINAL_STATUSES)).toBe(true)
+    expect([...TERMINAL_STATUSES]).toEqual(['idle', 'hacking', 'hacked'])
+  })
+
+  it('the hack numbers are finite and sensible', () => {
+    for (const v of [HACK_DURATION_MS, HACK_RANGE, HACK_DECAY_RATIO, HACK_ALERT_AFTER_MS]) {
+      expect(Number.isFinite(v)).toBe(true)
+      expect(v).toBeGreaterThan(0)
+    }
+    // The alert comes while the hack is still running, and decay is no faster than gain.
+    expect(HACK_ALERT_AFTER_MS).toBeLessThan(HACK_DURATION_MS)
+    expect(HACK_DECAY_RATIO).toBeLessThanOrEqual(1)
+  })
+
+  it('HACK_RANGE is smaller than the distance between the two terminals, so one spot never reaches both', () => {
+    const [a, b] = GRAYBOX_MAP.terminals
+    expect(GRAYBOX_MAP.terminals).toHaveLength(2)
+    expect(HACK_RANGE * 2).toBeLessThan(Math.hypot(a.x - b.x, a.z - b.z))
+  })
+
+  it('the active terminal exists in the map', () => {
+    expect(GRAYBOX_MAP.terminals.map((t) => t.id)).toContain(ACTIVE_TERMINAL_ID)
   })
 })
