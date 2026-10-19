@@ -257,6 +257,21 @@ export function addCylinder(geo, { base, tip, radius, seg = 8, joint, reg }) {
   }
 }
 
+/** Gives accessory vertices geo.v[from..to) the skin weights of the nearest body vertex, so plates and straps follow the body's soft deformation. */
+export function reskinNearest(geo, from, to) {
+  const body = geo.v.filter((v) => v.tag !== 9)
+  for (let i = from; i < to; i++) {
+    const v = geo.v[i]
+    let best = null, bd = Infinity
+    for (const b of body) {
+      const d = (b.p[0] - v.p[0]) ** 2 + (b.p[1] - v.p[1]) ** 2 + (b.p[2] - v.p[2]) ** 2
+      if (d < bd) { bd = d; best = b }
+    }
+    v.j = best.j.slice()
+    v.w = best.w.slice()
+  }
+}
+
 // ---------------------------------------------------------------- palette atlas
 /** Minimal RGB PNG encoder (no dependency). */
 function encodePng(rgb, w, h) {
@@ -481,3 +496,29 @@ export async function finish(doc, outPath) {
 }
 
 export { Document }
+
+/** Minimal PNG decoder for 8-bit RGB or RGBA, non-interlaced (enough for the Quaternius atlases). Returns {w,h,ch,data}. */
+export function decodePng(buf) {
+  let p = 8, w = 0, h = 0, ct = 0
+  const idat = []
+  while (p < buf.length) {
+    const n = buf.readUInt32BE(p), type = buf.toString('ascii', p + 4, p + 8), d = buf.subarray(p + 8, p + 8 + n)
+    if (type === 'IHDR') { w = d.readUInt32BE(0); h = d.readUInt32BE(4); ct = d[9]; if (d[8] !== 8 || d[12] !== 0 || (ct !== 2 && ct !== 6)) throw new Error('unsupported png') }
+    if (type === 'IDAT') idat.push(d)
+    p += 12 + n
+  }
+  const ch = ct === 2 ? 3 : 4
+  const raw = zlib.inflateSync(Buffer.concat(idat))
+  const stride = w * ch, out = Buffer.alloc(stride * h)
+  for (let y = 0; y < h; y++) {
+    const f = raw[y * (stride + 1)], src = y * (stride + 1) + 1
+    for (let x = 0; x < stride; x++) {
+      const a = x >= ch ? out[y * stride + x - ch] : 0, b = y ? out[(y - 1) * stride + x] : 0, c = x >= ch && y ? out[(y - 1) * stride + x - ch] : 0
+      let v = raw[src + x]
+      if (f === 1) v += a; else if (f === 2) v += b; else if (f === 3) v += (a + b) >> 1
+      else if (f === 4) { const pp = a + b - c, pa = Math.abs(pp - a), pb = Math.abs(pp - b), pc = Math.abs(pp - c); v += pa <= pb && pa <= pc ? a : pb <= pc ? b : c }
+      out[y * stride + x] = v & 255
+    }
+  }
+  return { w, h, ch, data: out }
+}

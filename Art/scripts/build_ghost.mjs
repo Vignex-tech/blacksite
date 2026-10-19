@@ -6,7 +6,7 @@
 // scale to 1.8 m. Needs `npm install` in Art/. Nothing from the downloads is executed.
 import {
   readGlb, jointInfo, ibmFor, simplifyDoc, extractGeometry, remapJoints, dominantJoint, centroid, rayHit,
-  addBox, addEllipsoid, addStrip, addCone, makeAtlas, writeGeometry, bakeScale, readClip, buildClip,
+  addBox, addEllipsoid, addStrip, addCone, reskinNearest, makeAtlas, writeGeometry, bakeScale, readClip, buildClip,
   movingTranslations, removeOldAnimations, disposeNodes, finish, sub, add, mul,
 } from './char_lib.mjs'
 
@@ -91,8 +91,9 @@ addCone(geo, { base: [0, 1.80, -0.085], tip: [0, 1.775, -0.2], radius: 0.07, seg
 }
 
 // harness: shoulder straps front and back, chest strap, belt ring, pouches
+const harnessFrom = geo.v.length
 const surfaceZ = (x, y, front) => {
-  const t = rayHit(bodyTris, [x, y, front ? 1 : -1], [0, 0, front ? -1 : 1], 'min')
+  const t = rayHit(bodyTris, [x + 0.0013, y + 0.0007, front ? 1 : -1], [0, 0, front ? -1 : 1], 'min')
   return t === null ? null : front ? 1 - t : -1 + t
 }
 for (const sx of [-1, 1]) {
@@ -132,7 +133,7 @@ for (const sx of [-1, 1]) {
   const rows = []
   const N = 14
   for (let i = 0; i < N; i++) {
-    const th = (i / N) * Math.PI * 2
+    const th = (i / N) * Math.PI * 2 + 0.013
     const d = [Math.cos(th), 0, Math.sin(th)]
     const row = [1.03, 1.1].map((y) => {
       const o = [0, y, zc]
@@ -148,6 +149,7 @@ for (const sx of [-1, 1]) {
   const zb = surfaceZ(0, 1.07, false) ?? -0.1
   addBox(geo, { center: [0, 1.06, zb - 0.025], size: [0.14, 0.07, 0.05], joint: J('spine_01'), reg: 'pouch' })
 }
+reskinNearest(geo, harnessFrom, geo.v.length)
 {
   // violet armband on the left upper arm (T-pose: the arm runs along +x)
   const armTris = geo.t.filter((t) => dominantJoint(t, keptOrder) === 'upperarm_l')

@@ -28,7 +28,7 @@ Originals are large (the packs are 12 to 16 MB zips) and are re-downloadable, so
 | Quaternius Universal Base Characters (Standard), fallback | https://quaternius.itch.io/universal-base-characters | |
 | Quaternius Sci-Fi Essentials Kit (Standard) | https://quaternius.itch.io/sci-fi-essentials-kit | `Gun_Rifle.gltf`, `Prop_*.gltf`, trim textures |
 | Quaternius Modular SciFi MegaKit (Standard) | https://quaternius.itch.io/modular-sci-fi-megakit | `Prop_*.gltf` |
-| KayKit Character Animations 1.1 (Free 1.1) | https://kaylousberg.itch.io/kaykit-character-animations | 14 MB, `Animations/gltf/Rig_Medium/*.glb`, `Mannequin Character/characters/Mannequin_Medium.glb` |
+| KayKit Character Animations 1.1 (Free 1.1), NOT USED (rejected, see Characters) | https://kaylousberg.itch.io/kaykit-character-animations | 14 MB, `Animations/gltf/Rig_Medium/*.glb`, `Mannequin Character/characters/Mannequin_Medium.glb` |
 | ambientCG materials | https://ambientcg.com/a/<assetId> (ids in the manifest) | 1K-JPG zips, 3 to 10 MB each |
 | Poly Haven kloppenheim_02_puresky (optional) | https://polyhaven.com/a/kloppenheim_02_puresky | 1k HDR, 1.4 MB |
 
@@ -65,3 +65,13 @@ Server rack, fence and ladder strip have no direct CC0 model chosen. Plan: serve
 ## Layout
 - `Art/scripts/`: repeatable commands. `Art/sources/`: small originals only. `Art/licenses/`: licence records. `Art/STYLE.md`: style guide.
 - `client/public/assets/{characters,props,textures,effects}/`: processed, final files (empty until the asset issues).
+
+
+## Characters (M8, #81) - built, not hand-made
+Scripts: `Art/scripts/char_lib.mjs` (shared), `build_ghost.mjs`, `build_warden.mjs`, `build_rifle.mjs`, runner `build_characters.sh <UAL1 glb> <UAL2 glb> <Gun_Rifle.gltf> <T_Guns_Batch1_BaseColor.png>`. Sources are re-downloaded (see Originals), each archive extracted into its own fresh folder; the scripts only parse the files as data. `inspect_rig.mjs` prints a glb's skeleton and clips.
+- **Both characters use the UAL mannequin** (realistic proportions, 23 joints after merging the finger joints into the hands). KayKit Mannequin_Medium was rejected: cartoon proportions (head half the body height), a smiley face and a printed "HELLO my name is" tag.
+- One skinned primitive each, a 512 px flat-colour PNG palette atlas embedded in the glb (PNG instead of WebP so no loader extension is needed; 1.6 KB), no external files, 1.8 m tall, feet at y=0, facing +z at yaw 0 (verified in Babylon; the loader's root mirror keeps +z facing +z). The bind pose is a T-pose, so play a clip before showing the model.
+- Ghost 3,600 tris, 349 KB: idle, walk, run, jump, fall, land, hit, crouch_idle, crouch_walk, mantle (UAL2 ClimbUp_1m, carries upward pelvis motion). **climb, hang, shimmy are not in the files** (procedural in client code, as planned).
+- Warden 4,220 tris, 349 KB: idle, walk, run, jump, fall, land, hit, idle_rifle, walk_rifle, run_rifle, fire, reload. The rifle clips come from the UAL two-handed pistol poses (the left hand is near the grip, not the foregrip); walk_rifle and run_rifle are the locomotion legs with the held aim pose on the upper body.
+- Rifle 1,393 tris, 77 KB: the source atlas has small printed serial text, so it is recoloured from the palette instead. Nodes `muzzle`, `grip`, `light_mount`. Attach recipe is in the manifest notes.
+- Character category total about 0.78 MB (budget 1.5 MB).

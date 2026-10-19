@@ -65,17 +65,17 @@
     {
       "name": "mesh_warden",
       "category": "characters",
-      "sourceName": "KayKit Character Animations 1.1 (Free)",
-      "sourceUrl": "https://kaylousberg.itch.io/kaykit-character-animations",
+      "sourceName": "Quaternius Universal Animation Library (Standard)",
+      "sourceUrl": "https://quaternius.itch.io/universal-animation-library",
       "licence": "CC0-1.0",
       "licenceUrl": "https://creativecommons.org/publicdomain/zero/1.0/",
-      "author": "Kay Lousberg",
+      "author": "Quaternius",
       "path": "client/public/assets/characters/mesh_warden.glb",
-      "maxBytes": 700000,
+      "maxBytes": 600000,
       "maxTriangles": 5000,
-      "status": "planned",
+      "status": "ready",
       "dateChecked": "2026-10-20",
-      "notes": "Base: Mannequin_Medium.glb (6,916 tris, 21 joints, 1 texture). Simplify to <=5,000 (tested: ratio 0.7 gives 5,051, so use ratio 0.68). Restyle: ballistic vest, helmet, radio and orange visor/trim accent added as small primitives. Clips from Rig_Medium (same skeleton): Idle_A, Walking_A, Running_A, Running_HoldingRifle, Jump_Start, Jump_Idle, Jump_Land, Hit_A, Ranged_2H_Aiming, Ranged_2H_Shoot, Ranged_2H_Shooting, Ranged_2H_Reload, Sneaking, Crouching."
+      "notes": "Built by Art/scripts/build_warden.mjs from UAL1_Standard.glb. KayKit Mannequin_Medium (the original plan) was rejected: cartoon proportions (head half the body height), a smiley face and a printed name tag with text. One skinned primitive, 4,220 tris, 23 joints, one embedded 512 px PNG palette atlas, no external files. Broader build (soft radial scaling), vest shell, chest and back plates, helmet, orange visor, comms, radio, flashlight mount (static, right shoulder, orange lens), belt, pouches. 1.8 m tall, feet at y=0, faces +z at yaw 0. Bind pose is a T-pose; play a clip before showing it. Clips: idle, walk, run, jump, fall, land, hit, idle_rifle (Pistol_Idle_Loop), walk_rifle and run_rifle (locomotion legs plus the held Pistol_Aim_Neutral upper body), fire (Pistol_Shoot), reload (Pistol_Reload). The rifle clips use the UAL two-handed pistol poses; the left hand holds near the grip, not the foregrip."
     },
     {
       "name": "mesh_rifle",
@@ -88,9 +88,9 @@
       "path": "client/public/assets/characters/mesh_rifle.glb",
       "maxBytes": 150000,
       "maxTriangles": 1500,
-      "status": "planned",
+      "status": "ready",
       "dateChecked": "2026-10-20",
-      "notes": "Base: Gun_Rifle.gltf (6,194 tris, atlas T_Guns_Batch1). Simplify to <=1,500 and use a 512 px atlas or flat materials. Check there is no logo or readable text on the atlas before use. The Ghost has no weapon art."
+      "notes": "Built by Art/scripts/build_rifle.mjs from Gun_Rifle.gltf. The source atlas has small printed serial text, so it is not shipped: triangles are recoloured from a 512 px flat palette atlas (dark, mid, light, orange). 1,393 tris, 0.9 m long, muzzle toward +z, origin at the barrel's underside at the rear (y up). Nodes: muzzle [0,0.18,0.9], grip [0,0.07,0.22], light_mount [0,0.10,0.72] (visual anchor only, no geometry). Third-person attach (checked in Babylon with idle_rifle): TransformNode mount parented to the Warden's hand_r node, position (-0.0037,-0.1641,-0.0281), rotationQuaternion (-0.0066,0.7695,0.6381,0.0249), scaling 1, then the loaded rifle root parented to mount. Source says CC0; no logo or readable text remains. The Ghost has no weapon art."
     },
     {
       "name": "mesh_prop_console",
