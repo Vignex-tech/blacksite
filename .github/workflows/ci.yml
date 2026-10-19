@@ -66,7 +66,8 @@ jobs:
 
   # The e2e suite runs as three parallel shards, each with its own built server
   # (#65). Wall time is the slowest shard. Shards are defined in
-  # Tests/scripts/e2e-shard.mjs; every spec belongs to exactly one.
+  # Tests/scripts/e2e-shard.mjs; every spec belongs to exactly one. The rounds
+  # shard (#67) has no specs until #69 and then passes at once.
   e2e:
     name: e2e (${{ matrix.shard }})
     runs-on: ubuntu-latest
@@ -75,7 +76,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        shard: [integration, browser-a, browser-b]
+        shard: [integration, browser-a, browser-b, rounds]
     steps:
       - name: Checkout
         uses: actions/checkout@v4
