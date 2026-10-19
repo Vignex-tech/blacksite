@@ -12,7 +12,7 @@ function collectErrors(page: Page): string[] {
 
 test('Babylon scene renders into #game-canvas without console errors', async ({ page }) => {
   const errors = collectErrors(page)
-  await page.goto('/')
+  await page.goto('/?gfx=low')
 
   const canvas = page.locator('#app > canvas#game-canvas')
   await expect(canvas).toBeVisible()
@@ -38,7 +38,7 @@ test('Babylon scene renders into #game-canvas without console errors', async ({ 
 test('canvas fills the window and resizes with it', async ({ page }) => {
   const errors = collectErrors(page)
   await page.setViewportSize({ width: 1024, height: 700 })
-  await page.goto('/')
+  await page.goto('/?gfx=low')
   const canvas = page.locator('#game-canvas')
   await expect(canvas).toHaveAttribute('data-engine', /^Babylon\.js/)
 
@@ -60,5 +60,55 @@ test('canvas fills the window and resizes with it', async ({ page }) => {
   expect(after.bufH).toBeLessThan(before.bufH)
   expect(after.bufW).toBeGreaterThan(0)
 
+  expect(errors).toEqual([])
+})
+
+// #80: with no ?gfx= the client runs on the player default tier (medium). A
+// full page load, joining the room and a few seconds of rendering must make no
+// request to any host but the page's own (no CDN, rule: no runtime CDN
+// fetches; Babylon's KTX and tools chunks mention cdn.babylonjs.com but must
+// never fetch it), and the hook's additive `perf` field must report real
+// numbers. Counts only; fps is never asserted (software GL). Adds about 4 s to
+// the browser-a shard.
+test('default tier loads with no external requests and reports perf', async ({ page, baseURL }) => {
+  const errors = collectErrors(page)
+  const origin = new URL(baseURL ?? 'http://localhost:2567').origin
+  const foreign: string[] = []
+  page.on('request', (req) => {
+    const url = req.url()
+    if (url.startsWith('data:') || url.startsWith('blob:') || url.startsWith('about:')) return
+    if (new URL(url).origin !== origin) foreign.push(url)
+  })
+  page.on('websocket', (ws) => {
+    if (new URL(ws.url()).host !== new URL(origin).host) foreign.push(ws.url())
+  })
+
+  await page.goto('/')
+  await expect(page.locator('#game-canvas')).toHaveAttribute('data-engine', /^Babylon\.js/)
+  await expect
+    .poll(() => page.evaluate(() => (window as any).__blacksite?.snapshot().connected), { timeout: 15_000 })
+    .toBe(true)
+
+  // The 500 ms sampler fills `perf` with counts of the frames drawn so far.
+  await expect
+    .poll(() => page.evaluate(() => (window as any).__blacksite.snapshot().perf?.drawCalls ?? 0), { timeout: 15_000 })
+    .toBeGreaterThan(0)
+  const perf = await page.evaluate(() => (window as any).__blacksite.snapshot().perf)
+  expect(Number.isFinite(perf.fps) && perf.fps >= 0).toBe(true)
+  // The art budget is 120 draw calls and 150k triangles (art-plan section 9), reached when
+  // the decoration is merged (#85/#93). The graybox map measures about 376 draw calls today
+  // (one per solid), so this is a regression ceiling to ratchet down, not the target.
+  expect(perf.drawCalls).toBeLessThanOrEqual(500)
+  expect(perf.activeTriangles).toBeGreaterThan(0)
+  expect(perf.activeTriangles).toBeLessThanOrEqual(150_000)
+
+  // F3 shows and hides the overlay without touching gameplay.
+  await expect(page.locator('#perf')).toBeHidden()
+  await page.keyboard.press('F3')
+  await expect(page.locator('#perf')).toBeVisible()
+  await page.keyboard.press('F3')
+  await expect(page.locator('#perf')).toBeHidden()
+
+  expect(foreign, 'requests to hosts other than the page origin').toEqual([])
   expect(errors).toEqual([])
 })

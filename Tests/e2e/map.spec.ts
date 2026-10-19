@@ -38,7 +38,7 @@ async function open(browser: Browser): Promise<{ page: Page; errors: string[] }>
   const context = await browser.newContext({ viewport: VIEWPORT })
   const page = await context.newPage()
   const errors = collectErrors(page)
-  await page.goto('/')
+  await page.goto('/?gfx=low')
   await expect(page.locator('#game-canvas')).toHaveAttribute('data-engine', /^Babylon\.js/)
   return { page, errors }
 }
@@ -125,7 +125,7 @@ test('each tab renders every solid of the shared map; screenshot for review', as
     try {
       const page = await context.newPage()
       await page.route('**/matchmake/**', (route) => route.abort())
-      await page.goto('/')
+      await page.goto('/?gfx=low')
       await expect(page.locator('#game-canvas')).toHaveAttribute('data-engine', /^Babylon\.js/)
       await expect(page.locator('#hud')).toContainText('offline')
       const s = await snap(page)

@@ -37,6 +37,12 @@ jobs:
         working-directory: client
         run: npm run build
 
+      # First load must stay under 30 MB (hard) and 20 MB (target), CLAUDE.md
+      # rule 8 and Docs/art-plan.md section 9 (#80). Dependency-free script.
+      - name: Client - first-load size check
+        working-directory: Tests
+        run: node scripts/check-first-load.mjs
+
       - name: Server - install
         working-directory: server
         run: npm ci

@@ -53,7 +53,7 @@ export async function openTab(
     if (msg.type() === 'error') errors.push(msg.text())
   })
   const sent = captureMoves(page)
-  await page.goto('/')
+  await page.goto('/?gfx=low')
   await expect(page.locator('#game-canvas')).toHaveAttribute('data-engine', /^Babylon\.js/)
   return { page, name, errors, sent }
 }

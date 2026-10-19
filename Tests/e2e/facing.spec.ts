@@ -39,7 +39,7 @@ function find(s: BlacksiteSnapshot, id: string): BlacksitePlayerSnapshot | undef
 async function openPlayer(browser: Browser): Promise<Page> {
   const context = await browser.newContext({ viewport: VIEWPORT })
   const page = await context.newPage()
-  await page.goto('/')
+  await page.goto('/?gfx=low')
   await expect(page.locator('#game-canvas')).toHaveAttribute('data-engine', /^Babylon\.js/)
   return page
 }

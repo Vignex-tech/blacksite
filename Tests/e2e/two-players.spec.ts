@@ -66,7 +66,7 @@ const same = (p: { x: number; z: number }, q: { x: number; z: number }) =>
 async function openPlayer(browser: Browser): Promise<Page> {
   const context = await browser.newContext({ viewport: VIEWPORT })
   const page = await context.newPage()
-  await page.goto('/')
+  await page.goto('/?gfx=low')
   // Sanity check that the scene started (not a pixel check).
   await expect(page.locator('#game-canvas')).toHaveAttribute('data-engine', /^Babylon\.js/)
   return page
