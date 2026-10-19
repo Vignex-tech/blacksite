@@ -11,9 +11,11 @@ export default defineConfig({
   // Browser pages joinOrCreate the one shared my_room (MAX_CLIENTS 8), so the
   // chromium project runs on one worker: specs must not land in each other's
   // room and change the player counts and boxes they check. The SDK specs
-  // only create fresh rooms and join them by id, so their two files run side
-  // by side (tests within a file stay in order) to keep e2e under 90 s (#25).
-  workers: 2,
+  // only create fresh rooms and join them by id, so they run on up to four
+  // workers at once (the height and climbing specs are in parallel mode). Their
+  // walks are paced by the 20 Hz move rate, not CPU, so this keeps e2e at
+  // about 2 min with the M4 climbing routes (#25, #32).
+  workers: 4,
   reporter: process.env.CI ? [['list'], ['html', { open: 'never' }]] : 'list',
   use: {
     baseURL: `http://localhost:${port}`,
@@ -23,7 +25,7 @@ export default defineConfig({
     // Node-side @colyseus/sdk clients against the real server. Runs first, on
     // its own, so browser pages (which joinOrCreate the shared room) can't
     // join its rooms and change the player counts it asserts.
-    { name: 'server-integration', testMatch: /\.integration\.spec\.ts$/, workers: 2 },
+    { name: 'server-integration', testMatch: /\.integration\.spec\.ts$/, workers: 4 },
     {
       name: 'chromium',
       testIgnore: /\.integration\.spec\.ts$/,

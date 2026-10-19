@@ -4,15 +4,15 @@ import {
   ACTION_MESSAGE,
   GRAVITY,
   JUMP_SPEED,
-  MOVEMENT_MODES,
   STEP_HEIGHT,
   type Team,
 } from '../../shared/protocol.js'
 import { UPPER_LEVEL_Y } from '../../shared/map.js'
 // Built server constants (server/build exists: Playwright's webServer runs it).
 import { ACTION_BURST, ACTION_RATE_HZ, SIM_RATE_HZ, parseAction } from '../../server/build/rooms/MyRoom.js'
-import { GRAYBOX_MAP, feetY, modeOf, rectsOverlap, playerRect, type Point } from './support/geometry.js'
+import { GRAYBOX_MAP, feetY, rectsOverlap, playerRect, type Point } from './support/geometry.js'
 import { EPS, Walker, joinInOrder, pos, waitForState, type GameRoom } from './support/sdk.js'
+import { track, type Sample } from './support/track.js'
 
 // M4 server height simulation (#29, verified in #30) through real
 // @colyseus/sdk clients: stairs, upper-level floors, walking off an edge,
@@ -37,37 +37,6 @@ test.afterEach(async () => {
 /** Highest feet height a jump of `team` can reach: JUMP_SPEED^2 / (2 * GRAVITY) (0.50625 for a Ghost). */
 const apexOf = (team: Team) => JUMP_SPEED[team] ** 2 / (2 * GRAVITY)
 const GHOST_APEX = apexOf('ghost')
-
-/** One synced state of a player, as one client saw it. */
-interface Sample {
-  t: number
-  x: number
-  y: number
-  z: number
-  mode: string
-}
-
-/**
- * Records every distinct synced (x, y, z, mode) of player `id` as `room`
- * receives it, from now on. Fails (in `bad`) if y or mode is missing or has a
- * bad type: since #29 the server always sends both.
- */
-function track(room: GameRoom, id: string): { samples: Sample[]; bad: string[] } {
-  const samples: Sample[] = []
-  const bad: string[] = []
-  const push = () => {
-    const p = room.state.players?.get(id) as unknown as Record<string, unknown> | undefined
-    if (!p) return
-    if (typeof p.y !== 'number' || !Number.isFinite(p.y)) bad.push(`y is ${JSON.stringify(p.y)}`)
-    if (typeof p.mode !== 'string' || !(MOVEMENT_MODES as readonly string[]).includes(p.mode)) bad.push(`mode is ${JSON.stringify(p.mode)}`)
-    const s: Sample = { t: Date.now(), x: p.x as number, y: feetY(p as never), z: p.z as number, mode: modeOf(p as never) }
-    const last = samples[samples.length - 1]
-    if (!last || last.x !== s.x || last.y !== s.y || last.z !== s.z || last.mode !== s.mode) samples.push(s)
-  }
-  room.onStateChange(push)
-  push()
-  return { samples, bad }
-}
 
 /** Number of jumps in a sample list: the times y starts rising (from the ground or after falling). */
 function jumpStarts(samples: Sample[]): number {

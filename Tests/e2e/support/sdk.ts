@@ -211,7 +211,7 @@ export class Walker {
    * Sends one paced move; resolves once this client's own x, z or yaw changes
    * in synced state, or after STEP_WAIT_MS if nothing changed.
    */
-  async send(msg: MoveMessage): Promise<{ changed: boolean; moved: boolean; at: SyncedPlayer }> {
+  async send(msg: MoveMessage, watchHeight = false): Promise<{ changed: boolean; moved: boolean; at: SyncedPlayer }> {
     const wait = this.lastSend + PACE_MS - Date.now()
     if (wait > 0) await new Promise((r) => setTimeout(r, wait))
     const before = this.state
@@ -221,6 +221,7 @@ export class Walker {
       const check = () => {
         const p = this.state
         if (p.x !== before.x || p.z !== before.z || p.yaw !== before.yaw) done(true)
+        else if (watchHeight && (p.y !== before.y || p.mode !== before.mode)) done(true)
       }
       const done = (v: boolean) => {
         clearTimeout(timer)
@@ -238,6 +239,18 @@ export class Walker {
   async step(dx: number, dz: number): Promise<{ moved: boolean; at: Point }> {
     const r = await this.send({ dx, dz })
     return { moved: r.moved, at: { x: r.at.x, z: r.at.z } }
+  }
+
+  /**
+   * One paced move while attached (climbing or hanging, #31): resolves once
+   * this client's own x, y, z, yaw or mode changes, or after STEP_WAIT_MS.
+   * `moved` is true if x, y, z or mode changed.
+   */
+  async attachedStep(dx: number, dz: number): Promise<{ moved: boolean; at: SyncedPlayer }> {
+    const before = this.state
+    const r = await this.send({ dx, dz }, true)
+    const at = r.at
+    return { moved: at.x !== before.x || at.y !== before.y || at.z !== before.z || at.mode !== before.mode, at }
   }
 
   /** Turns to `yaw` with yaw-only moves (resent until it lands); returns the synced yaw. */
