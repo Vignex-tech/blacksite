@@ -10,6 +10,7 @@ import {
   FIRE_MESSAGE,
   FIRE_RATE_HZ,
   FRIENDLY_FIRE,
+  HACK_ALERT_AFTER_MS,
   HACK_PROGRESS_MESSAGE,
   INTERACT_MESSAGE,
   GROUND_SIZE,
@@ -178,6 +179,9 @@ export class MyRoom extends Room<{ state: MyRoomState }> {
   /** Server time (ms) up to which `progress` is settled. */
   private progressAt: number | undefined;
 
+  /** Server time (ms) at which the current unbroken hack began; undefined while nobody hacks. Server-only. */
+  private hackStartedAt: number | undefined;
+
   /** Last progress sent to Ghost clients. */
   private sentProgress = 0;
 
@@ -240,18 +244,46 @@ export class MyRoom extends Room<{ state: MyRoomState }> {
       this.progress = advanceProgress(this.progress, dt, this.hackers.size > 0);
       if (this.progress >= 1) {
         this.hackers.clear();
+        this.hackStartedAt = undefined;
         term.status = "hacked";
+        if (term.alert) term.alert = false;
       }
     }
     this.progressAt = now;
   }
 
-  /** Sets the terminal status from the hacker set (hacked is final). */
+  /**
+   * Sets the synced terminal values from the hacker set (hacked is final). What
+   * is synced is exactly what a Warden may learn (#58, rules 2 and 3), so the
+   * state is not view-tagged and carries no second, richer copy: `alert` is
+   * true once the current unbroken hack has run HACK_ALERT_AFTER_MS, and
+   * `status` shows "hacking" only while `alert` is true (the first
+   * HACK_ALERT_AFTER_MS give no cue; Ghosts have their own hackProgress
+   * message). Both fall back to idle/false the moment the hack is interrupted.
+   */
   private syncTerminal() {
     const term = this.state.terminals.get(ACTIVE_TERMINAL_ID);
     if (!term || term.status === "hacked") return;
-    const status = this.hackers.size > 0 ? "hacking" : "idle";
+    let alert = false;
+    if (this.hackers.size === 0) {
+      this.hackStartedAt = undefined;
+    } else {
+      const now = this.now();
+      if (this.hackStartedAt === undefined) this.hackStartedAt = now;
+      alert = now - this.hackStartedAt >= HACK_ALERT_AFTER_MS;
+    }
+    const status = alert ? "hacking" : "idle";
     if (term.status !== status) term.status = status;
+    if (term.alert !== alert) term.alert = alert;
+  }
+
+  /** Stops a player's hack at once (progress is settled first and then decays). A fresh interact is needed to resume. */
+  private interruptHack(sessionId: string) {
+    if (!this.hackers.has(sessionId)) return;
+    this.settleHack();
+    this.hackers.delete(sessionId);
+    this.syncTerminal();
+    this.sendProgress();
   }
 
   /** Sends progress to Ghost clients when it changed since the last send (Wardens never get it). */
@@ -421,6 +453,8 @@ export class MyRoom extends Room<{ state: MyRoomState }> {
 
       if (move.yaw !== undefined) player.yaw = move.yaw;
       if (move.dx === 0 && move.dz === 0) return;
+      // Any non-zero intent interrupts a hack (turning to aim does not).
+      this.interruptHack(client.sessionId);
 
       if (player.mode === "climbing" || player.mode === "hanging") {
         // Attached: dz climbs along the anchor, dx shimmies along the ledge.
@@ -454,9 +488,14 @@ export class MyRoom extends Room<{ state: MyRoomState }> {
 
       const team = player.team as Team;
       if (action === "jump") {
+        // Leaving the ground interrupts a hack (a refused jump changes nothing).
+        const wasGround = player.mode === "ground";
         // Only from the ground, and only for teams that can jump (not Wardens).
         const body = this.bodyOf(client.sessionId, player);
-        if (startJump(body, JUMP_SPEED[team])) this.storeBody(client.sessionId, player, body);
+        if (startJump(body, JUMP_SPEED[team])) {
+          this.storeBody(client.sessionId, player, body);
+          if (wasGround) this.interruptHack(client.sessionId);
+        }
         return;
       }
       const body = this.climbBodyOf(client.sessionId, player);
@@ -471,7 +510,10 @@ export class MyRoom extends Room<{ state: MyRoomState }> {
         // 'drop': let go when attached; a no-op in any other mode.
         changed = letGo(body);
       }
-      if (changed) this.storeClimbBody(client.sessionId, player, body);
+      if (changed) {
+        this.storeClimbBody(client.sessionId, player, body);
+        this.interruptHack(client.sessionId);
+      }
     },
 
     [RELOAD_MESSAGE]: (client: Client, message: unknown) => {
@@ -570,6 +612,8 @@ export class MyRoom extends Room<{ state: MyRoomState }> {
     victim.health = Math.max(0, before - weapon.damage);
     const damage = before - victim.health;
     const killed = victim.health <= 0;
+    // Any damage stops the victim's hack at once; no other penalty.
+    if (damage > 0) this.interruptHack(hit.id);
     if (killed) this.eliminate(hit.id, victim);
     client.send(HIT_EVENT, { target: hit.id, damage, killed });
     this.clients.getById(hit.id)?.send(DAMAGED_EVENT, { damage, health: victim.health, killed });

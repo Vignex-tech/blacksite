@@ -97,7 +97,7 @@ describe("MyRoom hacking", () => {
     const { room, g, atTerminal, hold, advance, term } = await setup();
     atTerminal(g);
     await hold(g);
-    assert.strictEqual(term().status, "hacking");
+    assert.strictEqual(term().status, "idle"); // withheld until the alert (#58)
     assert.strictEqual(room.hackProgress, 0);
     advance(HACK_DURATION_MS / 2);
     assert.ok(Math.abs(room.hackProgress - 0.5) < 1e-9);
@@ -184,18 +184,28 @@ describe("MyRoom hacking", () => {
   });
 
   it("invalid payloads spend no token; the flood limit holds", async () => {
-    const { g, atTerminal, send, hold, release, term, tick } = await setup();
+    const { room, g, atTerminal, send, hold, release, advance, tick } = await setup();
     atTerminal(g);
     for (const bad of [null, 5, "x", [], [true], {}, { active: 1 }, { active: "yes" }, { active: null }]) await send(g, bad);
     await hold(g); // burst token 1
-    assert.strictEqual(term().status, "hacking");
+    advance(1000);
+    assert.ok(Math.abs(room.hackProgress - 0.1) < 1e-9);
     await release(g); // burst token 2
-    assert.strictEqual(term().status, "idle");
-    await hold(g); // no token left: ignored
-    assert.strictEqual(term().status, "idle");
+    const kept = room.hackProgress;
+    advance(1000);
+    assert.ok(room.hackProgress < kept); // decaying: refill from the advance
+    tick(0);
+    await hold(g); // token (refilled by the 1 s advance)
+    await release(g); // token
+    await hold(g); // none left: ignored
+    const before = room.hackProgress;
+    advance(1000);
+    assert.ok(room.hackProgress < before);
     tick(1000 / INTERACT_RATE_HZ);
     await hold(g); // one token refilled
-    assert.strictEqual(term().status, "hacking");
+    const again = room.hackProgress;
+    advance(1000);
+    assert.ok(room.hackProgress > again);
   });
 
   it("progress decays at HACK_DECAY_RATIO of the gain rate and floors at 0", async () => {

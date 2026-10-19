@@ -27,7 +27,7 @@ export type Player = SchemaType<typeof Player>;
  * One data terminal (M6, #56), keyed by terminal id. Sent to every client, so it
  * holds nothing a Warden must not know: no hacker, no count, no position, no
  * progress (progress is server-only and goes to Ghost clients as a message).
- * `status` is one of TERMINAL_STATUSES; `alert` is set by #58 and stays false.
+ * `status` is one of TERMINAL_STATUSES; `alert` is true once a hack has run HACK_ALERT_AFTER_MS (#58). `status` shows "hacking" only while `alert` is true, so these two values are all a Warden ever learns.
  */
 export const Terminal = schema({
   id: t.string().default(""),
