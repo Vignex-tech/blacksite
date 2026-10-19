@@ -15,11 +15,22 @@ Not filed as issues. The owner decides when (and whether) they go into a milesto
 ## Follow-ups from Milestone 4 (#26)
 Not filed as issues unless noted. The owner decides when (and whether) they go into a milestone. Owners in brackets.
 
-- **#37, tsc errors in `server/test/MyRoomClimbing.test.ts`** (server-engineer, **filed, open**). `npx tsc --noEmit` in `server/` reports 2 type errors (lines 94-95). Mocha runs through tsx, so CI doesn't catch them; consider a type-check step for server tests in CI (qa-build owns `.github/`) (from #33).
-- **E2E suite time** (qa-build, maybe gameplay-engineer or server-engineer). The full e2e suite takes about 2.3 min in CI (2.6-2.7 min locally), mostly walks limited by the 20 Hz move rate. Options: shorter routes, spawning SDK clients nearer their start points through a test-only room option, or more parallel rooms. Any server-side shortcut must be off in production (from #30, #32, #36).
+- **#37, tsc errors in `server/test/MyRoomClimbing.test.ts`** (server-engineer, **fixed in M5; CI now runs `tsc --noEmit` in `server/`**). `npx tsc --noEmit` in `server/` reports 2 type errors (lines 94-95). Mocha runs through tsx, so CI doesn't catch them; consider a type-check step for server tests in CI (qa-build owns `.github/`) (from #33).
+- **E2E suite time** (qa-build, maybe gameplay-engineer or server-engineer). The full e2e suite took about 2.3 min in CI at M4 and is about 3.5 min at M5 (3.7-3.8 min locally), mostly walks limited by the 20 Hz move rate. Options: shorter routes, spawning SDK clients nearer their start points through a test-only room option, or more parallel rooms. Any server-side shortcut must be off in production (from #30, #32, #36).
 - **Shimmy can't cross between adjacent ledges** (server-engineer, shared map if needed). `ledge-mezz-south` and `ledge-catwalk-south` meet at x -7.5, but a hanging Ghost stops at the segment end; there is no transfer between ledges (from #31).
 - **No feedback when a mantle is blocked** (gameplay-engineer, maybe server-engineer). A refused `climb` while hanging changes nothing and the player gets no cue. The client could show a hint when a mantle would be refused, or the server could send a refusal reason (from #31).
 - **The nose pokes about 0.1 into walls** (gameplay-engineer). When a player is flush against a wall or slab, the yellow nose mesh sticks into it (from M3, noted again on #33 and #34).
 - **Ramp side-face normal** (gameplay-engineer, cosmetic). On the ramp mesh, the corner vertex at the low end of each side face belongs only to a zero-area triangle, so its normal is (0, 0, 0). Nothing visible (from #34).
 - **No persistent "Space: jump" hint** (gameplay-engineer). `#climb-prompt` only shows `E: climb` near an anchor; there is no key hint while on the ground (from #35).
 - **The yaw-following camera swings when grabbing an anchor** (gameplay-engineer). A grab snaps the server yaw to the anchor's facing, and the third-person camera follows it, so the view swings abruptly. Smooth the transition or keep the camera's own yaw while attached (from M4 hand checks).
+
+## Follow-ups from Milestone 5 (#38)
+Not filed as issues. The owner decides when (and whether) they go into a milestone. Owners in brackets.
+
+- **Ghost third-person crosshair vs the eye ray** (gameplay-engineer, maybe server-engineer). The Ghost camera orbits a shoulder point 3.2 behind, but shots leave the body's eye at 1.6 along the camera yaw and pitch, so the crosshair and the hit point differ at close range. Options: aim from a camera raycast and send that direction (the server still validates) (from #50, #38 item 7).
+- **Hanging-kill is covered only in Mocha** (qa-build). A hanging Ghost killed on a ledge falls and settles is tested in `server/test/MyRoomReload.test.ts`, not in e2e, because the walk is long. Accepted by the main session (from #44).
+- **One-step visibility leak** (server-engineer). A Ghost that leaves a Warden's sight can still reach that client for up to 50 ms, because views update once per simulation step. Could also re-evaluate on each move message. Room size and join/leave stay observable (Colyseus requires it). Accepted for now (from #46).
+- **E2E time budget** (qa-build). About 3.5 min in CI, above the 3 min target. Options: shorter routes, a test-only spawn option that is off in production, more parallel rooms, or splitting the slow serial tab specs (from #51).
+- **No spectator camera or respawn** (gameplay-engineer, server-engineer). An eliminated player is a frozen grey body with their own camera until M7 rounds (from #38).
+- **Weapon realism left out** (gameplay-engineer, server-engineer). No lag compensation (Phase 3 latency work), no headshots, recoil or spread (from #38).
+- **Pixel feedback is not asserted** (qa-build). Tracer, hit marker and damage flash are checked through hook counters only, because headless pointer lock is flaky (from #50).
