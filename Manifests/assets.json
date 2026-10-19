@@ -50,17 +50,17 @@
     {
       "name": "mesh_ghost",
       "category": "characters",
-      "sourceName": "Quaternius Universal Animation Library (Standard)",
+      "sourceName": "Quaternius Universal Animation Library 1 and 2 (Standard)",
       "sourceUrl": "https://quaternius.itch.io/universal-animation-library",
       "licence": "CC0-1.0",
       "licenceUrl": "https://creativecommons.org/publicdomain/zero/1.0/",
       "author": "Quaternius",
       "path": "client/public/assets/characters/mesh_ghost.glb",
-      "maxBytes": 700000,
+      "maxBytes": 600000,
       "maxTriangles": 4000,
-      "status": "planned",
+      "status": "ready",
       "dateChecked": "2026-10-20",
-      "notes": "Base: UAL1_Standard.glb mannequin (13,744 tris, 65 joints). Simplify to <=4,000 tris (tested: ratio 0.28 gives 3,847). Restyle with flat materials (dark technical clothing) and small added primitives for hood, harness, gloves and violet accent, built by a script from boxes and cylinders, no Blender. Clips to embed: Idle_Loop, Walk_Loop, Jog_Fwd_Loop, Sprint_Loop, Jump_Start, Jump_Loop, Jump_Land, Hit_Chest, Hit_Head, Crouch_Idle_Loop, Crouch_Fwd_Loop, and UAL2 ClimbUp_1m (mantle). Prune all other clips (the full file is 7 MB with 45 clips). Fallback base: Universal Base Characters Standard."
+      "notes": "Built by Art/scripts/build_ghost.mjs from UAL1_Standard.glb (mannequin, clips) and UAL2_Standard.glb (ClimbUp_1m). One skinned primitive, 3,600 tris, 23 joints (finger joints merged into the hands), one 512 px PNG palette atlas embedded (1.6 KB), no external files. Scale baked so the model is 1.8 m tall, feet at y=0, faces +z at yaw 0 (Babylon's glTF root keeps +z facing +z). Bind pose is a T-pose (about 1.9 m wide); play a clip before showing it. Gear: hood with violet visor strip, harness straps, chest buckle, belt and pouches, violet left armband, gloves, boots, knee pads. No weapon. Clips: idle, walk, run, jump, fall, land, hit, crouch_idle, crouch_walk, mantle (UAL2 ClimbUp_1m; it carries upward pelvis motion). Not included, to be posed procedurally in client code: climb, hang, shimmy."
     },
     {
       "name": "mesh_warden",
