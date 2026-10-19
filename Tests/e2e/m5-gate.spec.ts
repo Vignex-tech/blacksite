@@ -122,7 +122,17 @@ test('M5 gate: the Warden shoots, reloads and eliminates the Ghost with the mous
     expect(await ghostSeenByWarden(), 'the Warden tab is not sent a hidden Ghost').toBeUndefined()
     const wallYaw = Math.atan2(wallGhost.x - wallWarden.x, wallGhost.z - wallWarden.z)
     await turnTo(wt, wallYaw)
-    await tilt(wt, -100) // look up 0.25 rad
+    // The camera pitch isn't 0 here in general: headless Linux CI can deliver a
+    // stray vertical mousemove with the real pointer lock (#63). The hook has no
+    // pitch, so read the starting pitch from a baseline shot at the wall, then
+    // check the tilt against it.
+    await holdFire(wt, 120)
+    await expect.poll(() => wt.sent.fires.length, { message: 'the baseline shot was sent', timeout: 5_000 }).toBe(1)
+    const basePitch = wt.sent.fires[0].pitch as number // wire convention, positive up
+    expect(Number.isFinite(basePitch)).toBe(true)
+    await sleep(600) // rifle cooldown
+    await tilt(wt, -100) // look up 0.25 rad from wherever it started
+    const firesBeforeWall = wt.sent.fires.length
     const ammoBeforeWall = hookVitals(await snap(wt.page), wardenId)!.ammo!
     const eventsBeforeWall = (await snap(wt.page)).events
     await holdFire(wt, 120)
@@ -131,7 +141,7 @@ test('M5 gate: the Warden shoots, reloads and eliminates the Ghost with the mous
       ghostHealth: (await ghostAs()).health,
       warden: await snap(wt.page),
       ghostTab: await snap(gt.page),
-      fires: wt.sent.fires.slice(),
+      fires: wt.sent.fires.slice(firesBeforeWall),
     }
     await tilt(wt, 100) // level again
     expect(afterWall.ghostHealth, 'a shot through the wall hurt nobody').toBe(MAX_HEALTH.ghost)
@@ -140,7 +150,9 @@ test('M5 gate: the Warden shoots, reloads and eliminates the Ghost with the mous
     expect(afterWall.ghostTab.events.damaged).toBe(0)
     expect(afterWall.fires).toHaveLength(1)
     expect(afterWall.fires[0].keys, 'a fire message carries only yaw and pitch').toEqual(['pitch', 'yaw'])
-    expect(afterWall.fires[0].pitch as number, 'looking up is a positive pitch on the wire').toBeCloseTo(100 * RAD_PER_PIXEL, 6)
+    const wallPitch = afterWall.fires[0].pitch as number
+    expect(wallPitch - basePitch, 'tilting up 100 px raised the wire pitch by 100 px of turn').toBeCloseTo(100 * RAD_PER_PIXEL, 6)
+    expect(wallPitch, 'looking up is a positive pitch on the wire').toBeGreaterThan(0)
     expect(Math.abs(wrap((afterWall.fires[0].yaw as number) - wallYaw))).toBeLessThan(RAD_PER_PIXEL)
 
     // 3. The Ghost steps into the doorway line; the Warden aims at its upper body.
@@ -159,7 +171,7 @@ test('M5 gate: the Warden shoots, reloads and eliminates the Ghost with the mous
     await turnTo(wt, yaw)
     const dist = Math.hypot(target.x - warden.x, target.z - warden.z)
     const wantPitch = Math.atan2(aimY - (warden.y + EYE_HEIGHT), dist) // wire convention: positive up
-    await tilt(wt, Math.round(-wantPitch / RAD_PER_PIXEL))
+    await tilt(wt, Math.round((basePitch - wantPitch) / RAD_PER_PIXEL)) // from the starting pitch (basePitch, wire) to wantPitch
     const firesBefore = wt.sent.fires.length
 
     // 4. One press, one shot: rifle damage in both tabs' state, the hit and damage events in the hook.
