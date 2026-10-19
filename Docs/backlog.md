@@ -34,3 +34,14 @@ Not filed as issues. The owner decides when (and whether) they go into a milesto
 - **No spectator camera or respawn** (gameplay-engineer, server-engineer). An eliminated player is a frozen grey body with their own camera until M7 rounds (from #38).
 - **Weapon realism left out** (gameplay-engineer, server-engineer). No lag compensation (Phase 3 latency work), no headshots, recoil or spread (from #38).
 - **Pixel feedback is not asserted** (qa-build). Tracer, hit marker and damage flash are checked through hook counters only, because headless pointer lock is flaky (from #50).
+
+## Follow-ups from Milestone 6 (#53)
+Not filed as issues unless noted. The owner decides when (and whether) they go into a milestone. Owners in brackets.
+
+- **E2E time** (qa-build, **filed as #65, the first M7 issue**). 4.8 min in CI after M6 (budget 4.0). Target 3.3 min, then M7 may add at most 40 s (from #62).
+- **Join-time `hackProgress` is missed by SDK and tab clients** (gameplay-engineer or server-engineer). The message goes out before listeners register, so a Ghost client's bar fills only from the first change. Options: resend the current progress once shortly after join, or a Ghost-only view field in state (it must not reach Wardens) (from #56, #61).
+- **Test hook has no camera pitch** (gameplay-engineer). An additive `camera.pitch` would remove the baseline-shot trick in `m5-gate` and `m6-gate` (from #63).
+- **Ghost-tab hack bar in a real tab** (qa-build). Covered by unit rules and the m6-gate walk; because of the join-time gap the bar is asserted from the first change only (from #61).
+- **SDK log noise** (qa-build). `onMessage() not registered for type hackProgress` in e2e output; register `collectProgress` on every Ghost client to silence it (from #57).
+- **Second terminal and extraction** (Phase 2). Only `terminal-a` can be hacked; `terminal-b` is dim and inert (from #53).
+- **Warden alarm gives no direction** (design, Phase 2). The alarm is a text line only; sound cues come with Phase 2.

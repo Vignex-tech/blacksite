@@ -4,7 +4,7 @@ Written 2026-10-18 by the director. Phase 1 ends at the graybox gate in `CLAUDE.
 
 > Two players on different devices join a room over the tunnel link, play Ghost and Warden with basic movement, climbing, weapon damage and one hackable terminal, and finish a timed round.
 
-Milestones #1 (two tabs join one room and see each other move), #9 (graybox map, server collision, test hook), #17 (teams, per-team speed and cameras) and #26 (vertical movement and climbing) are done; #38 (weapons and the visibility filter) are done. The milestones below run in order. Each one starts with its `shared/` contract and its server-authority work, because the server decides everything (rule 1). The client renders and sends inputs; qa-build verifies each piece before the next one starts. Only the next milestone has GitHub issues; later ones are filed when the one before passes its gate.
+Milestones #1 (two tabs join one room and see each other move), #9 (graybox map, server collision, test hook), #17 (teams, per-team speed and cameras) and #26 (vertical movement and climbing) are done; #38 (weapons and the visibility filter) and #53 (the hackable terminal) are done. The milestones below run in order. Each one starts with its `shared/` contract and its server-authority work, because the server decides everything (rule 1). The client renders and sends inputs; qa-build verifies each piece before the next one starts. Only the next milestone has GitHub issues; later ones are filed when the one before passes its gate.
 
 ## Milestones
 
@@ -78,7 +78,8 @@ Milestones #1 (two tabs join one room and see each other move), #9 (graybox map,
 - **Gate:** shots through walls never hit; fire rate and ammo are enforced on the server (a forged rapid-fire client is capped); a Ghost dies in fewer hits than a Warden; an eliminated player cannot move, act or shoot; a Warden client is not sent the position of a Ghost behind a wall.
 - **Not in M5:** respawn and rounds (M7), terminals (M6), lag compensation, headshots, recoil, spectator camera, gadgets, flashlight and sound cues (Phase 2).
 
-### Milestone 6: one hackable terminal (tracking issue #53, issues #54 to #62)
+### Milestone 6: one hackable terminal (tracking issue #53, issues #54 to #62, done, CI green on efc5f7f)
+- **Status:** done. Issues #54 to #62 plus bug #63 are closed with green CI (commits 00bbb3c, 24633ab, e82d4ed, a93b417, 822a1e8, 6e4f377, e6149f4, 2acb41e, efc5f7f, cde5928). The main session approved all defaults while the owner was away. e2e grew to 4.8 min in CI, so M7 starts with #65. Follow-ups are in `Docs/backlog.md`.
 - **Goal:** a Ghost can hack one data terminal by holding interact in range, and the Warden can interrupt it.
 - **Order:** `shared/` first: the interact message (`{ active }`, no terminal id), terminal state (`status`, `alert`), the hack constants and the active terminal id (#54). qa-build makes the tests ready (#55). Then server: range, team and mode checks, progress over server time, decay, completion (#56); interruptions (moving, damage, elimination, leaving range or the ground) and what a Warden learns (#58). Then client: terminal marker, prompt, progress bar, Warden alert, F binding (#60). Each is followed by a qa-build issue, ending with the real-tab gate (#62).
 - **Run order (one agent at a time):**
@@ -100,11 +101,28 @@ Milestones #1 (two tabs join one room and see each other move), #9 (graybox map,
 - **Gate:** a Ghost in range completes the hack in the configured time; out of range, as a Warden, or while hit, progress does not advance; a forged interact from across the map is rejected; a Warden client is never told the progress or the hacker.
 - **Not in M6:** the win, the round timer and the terminal reset (M7), the extraction step and the second active terminal (Phase 2).
 
-### Milestone 7: timed round, win and loss
-- **Goal:** a round starts, runs on a configurable timer, ends with a winner and resets.
-- **Order:** `shared/` first: round phase (waiting, countdown, live, ended), time left, winner, and the round settings shape. Then server: the round state machine, with every timer configurable (default about 7 minutes; tests use seconds). Ghosts win when the terminal hack completes. Wardens win when every Ghost is eliminated or time runs out. Positions, health and ammo reset for the next round. Then client: round timer, round result screen, the simple HUD tidied up.
-- **Agents:** gameplay-engineer, server-engineer, qa-build.
-- **Gate:** an integration test plays full rounds with SDK clients and a short timer and reaches each outcome (hack complete, Ghost eliminated, time out); the clients show the timer and the result.
+### Milestone 7: timed round, win and loss (tracking issue #64, issues #65 to #74)
+- **Goal:** a round starts, runs on a server timer (about 7 min live), ends with a winner and a visible result, and resets.
+- **Order:** first cut e2e time (#65). `shared/` next: phases, settings, result, round state (#66). Then qa-build readiness plus a second test server with short timers (#67), the server state machine (#68), win conditions and terminal reset (#70), then the client timer, banner and result screen (#72). A QA issue follows each, ending with the gate (#74).
+- **Run order (one agent at a time):**
+
+  | Order | # | Issue | Agent | Depends on |
+  |---|---|---|---|---|
+  | 1 | #65 | QA: cut e2e time to 3.3 min without losing gate coverage | qa-build | none |
+  | 2 | #66 | Shared contract: round phases, settings, result and round state | gameplay-engineer | none |
+  | 3 | #67 | QA: make existing tests ready for round state and a round-enabled test server | qa-build | #65, #66 |
+  | 4 | #68 | Server: round state machine, timers, reset and input lock-out | server-engineer | #66, #67 |
+  | 5 | #69 | QA: verify round phases, lock-out, reset and startup-only config | qa-build | #68 |
+  | 6 | #70 | Server: win conditions, edge cases and terminal reset | server-engineer | #68, #69 |
+  | 7 | #71 | QA: verify every outcome, edge cases and reset on the wire | qa-build | #70 |
+  | 8 | #72 | Client: round timer, phase banner, result screen and HUD tidy | gameplay-engineer | #70, #71 |
+  | 9 | #73 | QA: verify the round UI and client behaviour | qa-build | #72 |
+  | 10 | #74 | QA: M7 gate in real tabs, all outcomes within the e2e budget | qa-build | #73 |
+
+- **Proposed defaults (the owner can change them):** countdown 10 s, live 420 s, result 10 s; start with 1 Ghost and 1 Warden; inputs frozen outside live; full reset at each countdown (spawns, health, ammo, terminals, hack); mid-round joiners sit out; a team emptying aborts the round with no winner; Ghosts win on hack, Wardens on all Ghosts gone or time out, with step order hack, elimination, timer. **Short timers for tests** come only from the server's startup environment (`BLACKSITE_ROUND_PRESET`: `open` for the main test server so old specs never wait, `fast` on a second server for round specs), never from a client (rule 1). Both teams see the same public round fields; no alive counts or hack progress. e2e budget: cut to <= 3.3 min first, M7 adds <= 40 s, ceiling 4.0 min.
+- **Agents:** gameplay-engineer (#66, #72), server-engineer (#68, #70), qa-build (#65, #67, #69, #71, #73, #74).
+- **Gate:** an integration test plays full rounds with SDK clients and short timers and reaches each outcome (hack complete, Ghost eliminated, time out); the clients show the timer and the result; round settings cannot be set by a client.
+- **Not in M7:** respawns, series and scores, lobbies and ready-up, extraction, spectator camera.
 
 ### Milestone 8: Phase 1 gate, two devices over the tunnel
 - **Goal:** prove the `CLAUDE.md` graybox gate on real hardware.
