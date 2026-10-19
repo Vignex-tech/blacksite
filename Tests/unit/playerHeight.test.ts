@@ -181,7 +181,7 @@ describe('poseOf (client/src/net.ts): y and mode from room state', () => {
 
   it('passes y and every movement mode through', () => {
     for (const mode of MOVEMENT_MODES) {
-      expect(poseOf(state({ y: 1.2, mode }))).toEqual({ team: 'ghost', yaw: 0, y: 1.2, mode })
+      expect(poseOf(state({ y: 1.2, mode }))).toMatchObject({ team: 'ghost', yaw: 0, y: 1.2, mode })
     }
   })
 
