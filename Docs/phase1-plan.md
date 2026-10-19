@@ -6,6 +6,8 @@ Written 2026-10-18 by the director. Phase 1 ends at the graybox gate in `CLAUDE.
 
 Milestones #1 (two tabs join one room and see each other move), #9 (graybox map, server collision, test hook), #17 (teams, per-team speed and cameras) and #26 (vertical movement and climbing) are done; #38 (weapons and the visibility filter) and #53 (the hackable terminal) are done. The milestones below run in order. Each one starts with its `shared/` contract and its server-authority work, because the server decides everything (rule 1). The client renders and sends inputs; qa-build verifies each piece before the next one starts. Only the next milestone has GitHub issues; later ones are filed when the one before passes its gate.
 
+**Owner override (2026-10-20):** the order is now milestone 8 art pass, milestone 9 Ghost takedown and crouch, milestone 10 the two-device test (the old milestone 8). Only milestone 8 has issues (#77 to #93)./
+
 ## Milestones
 
 ### Milestone 2: graybox map, server collision, client test hook (tracking issue #9, done, CI green on 9c0c0b0)
@@ -125,23 +127,44 @@ Milestones #1 (two tabs join one room and see each other move), #9 (graybox map,
 - **Gate:** an integration test plays full rounds with SDK clients and short timers and reaches each outcome (hack complete, Ghost eliminated, time out); the clients show the timer and the result; round settings cannot be set by a client.
 - **Not in M7:** respawns, series and scores, lobbies and ready-up, extraction, spectator camera.
 
-### Milestone 8: Phase 1 gate, two devices over the tunnel
-- **Goal:** prove the `CLAUDE.md` graybox gate on real hardware.
-- **Work:** qa-build adds a scripted end-to-end round with two browser pages (one Ghost, one Warden) and measures the first-load size against the 30 MB budget. The owner runs the game through `cloudflared` and plays one full round from two different devices (two computers; phone controls are a release-prep feature). Bugs become issues for the owning agent. The director updates `Docs/handoff.md` and marks Phase 1 done.
+### Milestone 8: art pass (tracking issue #77, issues #78 to #93)
+- **Status:** planned 2026-10-20 under the owner override in `CLAUDE.md` (art first, then the Ghost takedown, then the two-device test). Full plan, sources, licences, budgets and the layout question: `Docs/art-plan.md`; owner brief: `Docs/master-brief.md`.
+- **Goal:** replace the graybox blocks with textured, lit low-poly art in our own dark style (CC0 sources, restyled), with no change to gameplay, server, shared contracts, map data or test selectors.
+- **Agents:** art-engineer (#78, #81, #84; proposed new agent owning `client/public/assets/`, `Art/`, `Manifests/`), gameplay-engineer (#79, #82, #85, #87, #89, #91), qa-build (#80, #83, #86, #88, #90, #92, #93). No server work.
+- **Run order (one agent at a time):** #78 sources and tooling, #79 loading foundation, #80 QA (manifest, glb and first-load checks), #81 characters and rifle, #82 client characters, #83 QA, #84 environment textures and props, #85 surfaces, #86 QA, #87 lighting, #88 QA, #89 terminals, anchors, props, #90 QA, #91 weapon feedback, #92 QA, #93 gate.
+- **Proposed defaults:** see `Docs/art-plan.md` section 12 (first load target 20 MB and hard 30 MB, 60 fps target on the owner's PC with `?gfx=` tiers, e2e slowest shard at most 2.5 min).
+- **Gate:** real-tab screenshots of characters, map, terminals, anchors and the rifle; first-load size under budget and measured in CI; all old gates still green. The owner then checks fps with F3.
+
+### Milestone 9: Ghost takedown and crouch (outline only, not filed until the M8 gate passes)
+Pulled forward from Phase 3 by the owner override. To be planned by the director after the art gate. Proposed defaults, each changeable:
+- **Ghost has no gun:** remove the Ghost entry from `WEAPONS`, refuse Ghost `fire` and `reload` on the server, remove the Ghost sidearm from HUD and client. The Ghost is still fragile (100 health) but now cannot fight back from range (rule 4: counters are sound, stealth and rescue).
+- **Crouch (Ghost):** toggle on `KeyV`, a `crouch` action, on the ground only. Height 1.1, speed 60 percent, cannot crouch while climbing, hanging or falling, stand-up needs headroom. Benefit: a Warden's near-sight range halves and crouched sample points are lower. Server decides; the visibility filter uses the crouched box. Crouch clips already exist from M8.
+- **Sneak grab:** `F` (interact) starts a grab when the Ghost is on the ground, within 1.2 of a living Warden, inside the Warden's rear cone (about 120 degrees behind its yaw), with clear line of sight, and not in hack range of the active terminal (hacking wins there). The server validates range, cone, line of sight and state; the message carries no target id.
+- **Grab state:** the Warden cannot fire or reload, moves at 30 percent speed, the Ghost moves at 50 percent and cannot hack, climb or jump. Grab lasts at most 4 s.
+- **Kill:** a second `F` press after at least 0.8 s of grab eliminates the Warden. Releasing instead (`C`) frees them. A grab that times out frees the Warden and puts the Ghost on a 5 s grab cooldown.
+- **Counters (rule 6):** the grabbed Warden struggles by mashing `Space` (server counts presses, 8 within 3 s frees them, the Ghost is staggered for 1 s); any damage to the Ghost from a teammate frees the Warden immediately (shots pass through the held Warden without hurting them, friendly fire stays off); the grab breaks if the Ghost leaves the ground or the Warden dies.
+- **Information:** the grabbed Warden and teammates see the grab state; no new Ghost position leaks beyond the existing visibility filter.
+- **Art:** new clips for the grab, struggle and takedown (art-engineer) and the grab prompt and HUD (gameplay-engineer).
+- **Order:** shared contract, QA readiness, server grab state machine, QA, server kill and counters, QA, client prompts and animation, QA, gate. The Ghost-gun removal comes first so no pistol art or tests are kept.
+
+### Milestone 10: Phase 1 gate, two devices over the tunnel (the old milestone 8)
+- **Goal:** prove the `CLAUDE.md` graybox gate on real hardware, with the art pass and the Ghost takedown in.
+- **Work:** qa-build adds a scripted end-to-end round with two browser pages (one Ghost, one Warden) and re-checks the first-load size against the 30 MB budget. The owner runs the game through `cloudflared` and plays one full round from two different devices (two computers; phone controls are a release-prep feature). Bugs become issues for the owning agent. The director updates `Docs/handoff.md` and marks Phase 1 done.
 - **Gate:** the `CLAUDE.md` Phase 1 gate, confirmed by the owner, with CI green.
+- **Proposed layout milestone:** the owner may want a map milestone toward Research Annex 07 between M9 and M10 (renumbering the two-device test to M11). See `Docs/art-plan.md` section 13; it is recommended after the art pass.
 
 ## Deferred out of Phase 1
 These are in the owner's original brief for the vertical slice. They are not needed for the graybox gate, so they move to later phases:
 - **Phase 2 (core asymmetry):** the Warden flashlight, several controllable lights, ceiling hanging and Shadow Drop, sound cues, stealth visibility, one gadget per side, the second active data terminal, and the extraction step after a hack. In Phase 1 the Ghosts win as soon as the hack completes.
-- **Phase 3:** hostage grab, restraint, escape and rescue, silent takedowns.
-- **Phase 4:** real models, animation, audio and the final HUD style.
+- **Phase 3:** hostage grab, restraint, escape and rescue. The sneak grab, the kill and the struggle/rescue counters were pulled forward into milestone 9.
+- **Phase 4:** audio and the final HUD style. Real models, textures and lighting were pulled forward into milestone 8 (owner override, 2026-10-20).
 
 Kept in Phase 1 because they are cheap: multiple entrances, Ghost and Warden spawn areas, two terminal placements in the map data (only one active), and the upper service level with one overhead route (milestone 4, because climbing needs somewhere to go).
 
 ## Decisions
 - **Map data lives in `shared/`** (`shared/map.js` + `map.d.ts`, plain data with no Babylon code), owned by gameplay-engineer. The server imports it for collision, spawns and validation (anchors, terminal ranges); the client imports it to render. Collision and validation code stays in `server/src/rules/`, owned by server-engineer. There is no level-builder agent.
 - **Test hook:** `window.__blacksite.snapshot()` returns a copy of what the client already knows. It ships in the production build because Playwright tests the production build. It must never expose more than the server sent that client, so it cannot leak hidden information.
-- **Graybox player shapes:** boxes until milestone 3, then a simple distinct shape per team. No assets in Phase 1.
+- **Graybox player shapes:** boxes until milestone 3, then a simple distinct shape per team. Superseded by the owner override: milestone 8 adds real assets; the graybox shapes remain as proxies and fallbacks.
 - **Room name:** keep `my_room` for now; it is a single constant in `shared/protocol.js` and can be renamed later at no cost.
 
 ## Recommendations for the owner

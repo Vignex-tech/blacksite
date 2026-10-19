@@ -1,11 +1,11 @@
 # Session hand-off
 
-Last updated 2026-10-20 by the director after milestone 7, on the owner's Windows PC (8 GB RAM). Read this before starting work.
+Last updated 2026-10-20 by the director (art pass planned after milestone 7), on the owner's Windows PC (8 GB RAM). Read this before starting work.
 
 ## State
 - Repo: `Vignex-tech/blacksite` (private), branch `main`. Milestones #1, #9 (M2), #17 (M3), #26 (M4), #38 (M5) and #53 (M6) and #64 (M7) are done; the M7 gate commit is `cfb4a71` ([run](https://github.com/Vignex-tech/blacksite/actions/runs/39309864854), CI green).
 - CI: `.github/workflows/ci.yml` (job `build-and-test`) builds the client and server, then runs Mocha (server), Vitest (`Tests/unit`) and Playwright (`Tests/e2e`). **Nothing counts as done until CI passes** (see `CLAUDE.md`).
-- Next: milestone 8, the Phase 1 gate on two real devices over the tunnel. **It needs the owner to play first** (see "Next: Milestone 8, owner steps" below); no M8 issues are filed yet. No open bugs. Follow-ups from M3 to M7 are in `Docs/backlog.md`.
+- Next (owner override, 2026-10-20): **milestone 8, the art pass** (tracking #77, issues #78 to #93, plan `Docs/art-plan.md`), then milestone 9 (Ghost takedown and crouch, outline in `Docs/phase1-plan.md`), then milestone 10, the two-device test described at the end of this file. No open bugs. Follow-ups from M3 to M7 are in `Docs/backlog.md`.
 
 ### Shared contract (`shared/`)
 - Plain ESM `.js` runtime files with `.d.ts` types, and `shared/package.json` (`"type": "module"`). The client imports `../../shared/<file>.js` and the server `../../../shared/<file>.js` (from `server/src/rooms/` or `server/src/rules/`).
@@ -201,6 +201,9 @@ All issues closed with green CI; the gate commit is `cfb4a71` ([run](https://git
 
 ## Decisions and open questions
 - Agents (`.claude/agents/`): director, gameplay-engineer, server-engineer, qa-build. Each edits only its own folders. The main session dispatches issues from the director's hand-off table, because subagents can't start other subagents.
+- **Owner override (2026-10-20), see `CLAUDE.md`:** the order is now milestone 8 art pass (tracking #77, issues #78 to #93, plan in `Docs/art-plan.md`), milestone 9 Ghost takedown and crouch (outline in `Docs/phase1-plan.md`, not filed until the art gate passes), milestone 10 the two-device test (the old milestone 8).
+- **Decided by the owner (2026-10-20):** art comes from free CC0 packs (generic, from no existing game), restyled to our own dark-lit low-poly look; every asset is recorded in `Manifests/assets.json`. "We need to add serious graphics and textures, right now it's just a bunch of blocks shooting each other." The Ghost carries no gun; it kills by a sneak grab from behind plus a second interact press; the grab counter is struggle or rescue (a grabbed Warden can struggle free, and a teammate shooting the Ghost frees them).
+- **Proposed by the director for the owner (changeable):** create an `art-engineer` agent (owns `client/public/assets/`, `Art/`, `Manifests/`); first load target 20 MB with the hard limit 30 MB; restyle the current layout first and add a layout milestone toward Research Annex 07 afterwards (`Docs/art-plan.md` section 13).
 - **Decided:** map data lives in `shared/` (owned by gameplay-engineer) so the server can use it for collision and validation; collision, spawn, team and movement code lives in `server/src/rules/`. No level-builder agent for now (see `Docs/phase1-plan.md`).
 - **Decided:** the client test hook `window.__blacksite` ships in the production build and shows only what the client already received.
 - **Decided by the owner on #9 (hidden information, rule 2):** every client receives every player's position until M5. In M5 the server adds a line-of-sight filter, reusing the weapon raycast, so Warden clients stop receiving Ghost positions they couldn't see. Test matches before M5 are not cheat-proof.
@@ -213,9 +216,9 @@ All issues closed with green CI; the gate commit is `cfb4a71` ([run](https://git
 - **Decided by the main session while the owner was away (on #64, changeable):** all proposed M7 defaults: startup-only preset, auto-start when both teams have a player, 10 s countdown, mid-round joiners sit out, an emptied team aborts the round with no winner (checked before the Wardens' elimination win), and a frozen body with no spectator camera. Each is one constant or one function.
 - **Agent models:** agents run on model `sonnet` (frontmatter in `.claude/agents/`, commit `1a0d5e9`). The main session re-runs an issue on Opus (Agent tool model override) when a Sonnet agent fails CI it can't fix, gets blocked, or delivers work that misses the acceptance criteria, and notes that in the issue's closing comment.
 - **QA runs:** qa-build runs the full e2e suite 2 times locally, then trusts CI.
-- `CLAUDE.md` holds the game brief and the rules every agent follows. The detailed original brief is the owner's master prompt, kept outside the repo.
+- `CLAUDE.md` holds the game brief and the rules every agent follows. The owner's detailed original brief is `Docs/master-brief.md`; where they conflict, `CLAUDE.md` wins (browser and Babylon.js instead of UE5, no Ghost gun).
 - Env files: `.env` and `.env.*` are git-ignored; only `server/.env.example` is committed.
-- Blender is deferred until the art phase, to save RAM.
+- Blender stays optional (headless only, to save RAM); the art plan restyles CC0 files with gltf-transform and runtime materials first.
 
 ## Running and sharing locally
 1. `npm run build` in `client/`.
@@ -261,8 +264,8 @@ Tests locally: build the client and server first, then in `Tests/` run `npm run 
 - A Warden on the stairs at z 4.5 is blocked by the catwalk slab edge for shots; z 3 works. Hidden-Ghost coordinates in wire-scan tests must not be round numbers.
 - Git: user.name is set only in this repo (`Vignex-tech`). There are LF/CRLF warnings on commit; they're harmless.
 
-## Next: Milestone 8, owner steps
-M8 is the Phase 1 gate: a full round on two real devices over the tunnel. The director has not filed M8 issues, because what to fix depends on what the owner finds. Please do this:
+## Later: Milestone 10 (the old Milestone 8), owner steps
+This is the Phase 1 gate, now after the art pass and the Ghost takedown (do not run it yet): a full round on two real devices over the tunnel. The director has not filed M8 issues, because what to fix depends on what the owner finds. Please do this:
 1. Pull `main` and build: `npm run build` in `client/`, then `npm run build` in `server/`.
 2. Start the server with the preset **unset**: `NODE_ENV=production node build/index.js` in `server/` (port 2567). You should not see the `!!!` preset line.
 3. In another terminal run `cloudflared tunnel --url http://localhost:2567` and copy the `https://*.trycloudflare.com` link.

@@ -1,0 +1,34 @@
+{
+  "version": 1,
+  "notes": "Ledger of every art asset. Only CC0, generic art from no existing game. Maintained by art-engineer; checked by a Vitest validator and a CI size check (issue #80). Names are lowercase snake_case with mesh_, tex_, anim_ or sfx_ prefixes. Statuses: planned, ready, used.",
+  "licenseAllowed": ["CC0-1.0"],
+  "budgets": {
+    "firstLoadHardLimitBytes": 30000000,
+    "firstLoadTargetBytes": 20000000,
+    "categoryBytes": {
+      "code": 4000000,
+      "characters": 1500000,
+      "props": 2500000,
+      "textures": 8000000,
+      "effects": 1000000,
+      "reserve": 3000000
+    },
+    "triangles": {
+      "mesh_ghost": 4000,
+      "mesh_warden": 5000,
+      "mesh_rifle": 1500,
+      "prop": 2000,
+      "propsTotal": 20000
+    },
+    "frame": {
+      "targetFps": 60,
+      "floorFps": 30,
+      "maxDrawCalls": 120,
+      "maxActiveTriangles": 150000,
+      "maxShadowCasters": 2,
+      "maxLocalLights": 3
+    }
+  },
+  "entryFields": ["name", "category", "sourceName", "sourceUrl", "licence", "licenceUrl", "author", "path", "maxBytes", "maxTriangles", "status", "dateChecked"],
+  "assets": []
+}

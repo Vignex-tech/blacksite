@@ -56,3 +56,9 @@ Not filed as issues. The owner decides when (and whether) they go into a milesto
 - **Rounds start automatically with no ready-up, scores or series** (design, Phase 5). A round starts as soon as each team has a player (from #64).
 - **Late listeners miss join-time messages** (gameplay-engineer or server-engineer). Both `hackProgress` and the first `round` event can be missed by a client that registers its listener after join. The client reads `state.round`, so the UI is unaffected; see the M6 item on `hackProgress` (from #76).
 
+
+## Notes from the art plan (M8, #77)
+- **Layout toward Research Annex 07** (owner decision, shared/ plus server plus tests): a layout milestone after the art pass is recommended in `Docs/art-plan.md` section 13.
+- **Babylon decoders default to a CDN** (Draco, KTX2, meshopt): never enable without self-hosting and counting them in the budget (rule 8).
+- **Send timer vs rendering** (existing item): textured, lit scenes slow headless software GL; tests default to `?gfx=low`. If the headless send rate falls under about 15 Hz it becomes a bug for gameplay-engineer.
+- **Server cache headers and gzip for assets** (server-engineer, only if the size check shows a need): `express.static` caching and compression for `.glb` and textures.
