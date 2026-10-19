@@ -294,7 +294,7 @@ describe('character animator on the shipped models (NullEngine)', () => {
   // is still running falls back to idle_rifle for a frame instead of restarting
   // it. Marked as an expected failure so CI stays green; delete `.fails` once the
   // client is fixed (the test then passes and Vitest flags the stale marker).
-  it.fails('a second shot while the fire clip runs restarts the clip', async () => {
+  it('a second shot while the fire clip runs restarts the clip', async () => {
     const model = await load('warden')
     const a = createCharacterAnimator(model, 'warden')
     a.observe(state())
