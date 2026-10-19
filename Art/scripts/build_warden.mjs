@@ -57,21 +57,24 @@ const J = (n) => keptOrder.indexOf(n)
 
 // broader build: soft radial scaling around each bone's axis, blended by skin weights.
 const BULK = {
-  pelvis: [1.12, 1.14], spine_01: [1.14, 1.16], spine_02: [1.2, 1.2], spine_03: [1.28, 1.2], neck_01: [1.1, 1.1],
-  clavicle_l: [1.1, 1.1], clavicle_r: [1.1, 1.1], upperarm_l: [1.22, 1.22], upperarm_r: [1.22, 1.22],
-  lowerarm_l: [1.14, 1.14], lowerarm_r: [1.14, 1.14],
-  thigh_l: [1.14, 1.14], thigh_r: [1.14, 1.14], calf_l: [1.1, 1.1], calf_r: [1.1, 1.1],
+  pelvis: [1.3, 1.26], spine_01: [1.36, 1.28], spine_02: [1.5, 1.34], spine_03: [1.66, 1.4], neck_01: [1.25, 1.25],
+  clavicle_l: [1.3, 1.3], clavicle_r: [1.3, 1.3], upperarm_l: [1.5, 1.5], upperarm_r: [1.5, 1.5],
+  lowerarm_l: [1.32, 1.32], lowerarm_r: [1.32, 1.32],
+  thigh_l: [1.36, 1.36], thigh_r: [1.36, 1.36], calf_l: [1.28, 1.28], calf_r: [1.28, 1.28],
+  foot_l: [1.34, 1.34], foot_r: [1.34, 1.34], ball_l: [1.34, 1.34], ball_r: [1.34, 1.34],
 }
 const CHILD = {
   pelvis: 'spine_01', spine_01: 'spine_02', spine_02: 'spine_03', spine_03: 'neck_01', neck_01: 'Head',
   clavicle_l: 'upperarm_l', clavicle_r: 'upperarm_r', upperarm_l: 'lowerarm_l', upperarm_r: 'lowerarm_r', lowerarm_l: 'hand_l', lowerarm_r: 'hand_r',
-  thigh_l: 'calf_l', thigh_r: 'calf_r', calf_l: 'foot_l', calf_r: 'foot_r',
+  thigh_l: 'calf_l', thigh_r: 'calf_r', calf_l: 'foot_l', calf_r: 'foot_r', foot_l: 'ball_l', foot_r: 'ball_r',
 }
 const axisPoint = (p, a, b, vertical) => {
   if (vertical) return [0, p[1], 0.0]
   const ab = sub(b, a), t = Math.max(0, Math.min(1, ((p[0] - a[0]) * ab[0] + (p[1] - a[1]) * ab[1] + (p[2] - a[2]) * ab[2]) / (ab[0] ** 2 + ab[1] ** 2 + ab[2] ** 2)))
   return add(a, mul(ab, t))
 }
+let minY0 = Infinity
+for (const v of geo.v) minY0 = Math.min(minY0, v.p[1])
 for (const v of geo.v) {
   const base = v.p
   let out = [0, 0, 0]
@@ -82,12 +85,13 @@ for (const v of geo.v) {
     let q = base
     if (f) {
       const vertical = TORSO.has(name) && name !== 'clavicle_l' && name !== 'clavicle_r'
-      const ax = axisPoint(base, W[name], W[CHILD[name]], vertical)
+      const ax = /^ball_/.test(name) ? axisPoint(base, W[name.replace('ball', 'foot')], W[name], false) : axisPoint(base, W[name], W[CHILD[name]], vertical)
       const d = sub(base, ax)
       q = vertical ? [ax[0] + d[0] * f[0], base[1], ax[2] + d[2] * f[1]] : add(ax, mul(d, f[0]))
     }
     out = add(out, mul(q, v.w[k]))
   }
+  out[1] = Math.max(out[1], minY0) // thicker boots must not sink below the floor
   v.p = out
 }
 
@@ -173,10 +177,27 @@ void bodyTris
   reskinNearest(geo, beltFrom, geo.v.length)
 }
 
+// shoulder pads, knee pads, back pack and collar: breaks up the lean mannequin outline at range (#95)
+{
+  for (const side of ['l', 'r']) {
+    const sx = side === 'l' ? 1 : -1
+    const sh = W['upperarm_' + side]
+    addBox(geo, { center: [sh[0] + sx * 0.045, sh[1] + 0.04, sh[2] - 0.005], size: [0.15, 0.075, 0.19], joint: J('upperarm_' + side), reg: 'plate' })
+    addBox(geo, { center: [sh[0] + sx * 0.085, sh[1] - 0.02, sh[2] - 0.005], size: [0.05, 0.08, 0.17], joint: J('upperarm_' + side), reg: 'plate' })
+    const kn = W['calf_' + side]
+    addBox(geo, { center: [kn[0], kn[1] + 0.01, kn[2] + 0.07], size: [0.14, 0.14, 0.06], joint: J('calf_' + side), reg: 'plate' })
+  }
+  const zb2 = surfaceZ(0, 1.28, false) ?? -0.18
+  addBox(geo, { center: [0, 1.25, zb2 - 0.055], size: [0.27, 0.24, 0.09], joint: J('spine_03'), reg: 'pouch' })
+  addBox(geo, { center: [0, 1.11, zb2 - 0.04], size: [0.27, 0.07, 0.06], joint: J('spine_02'), reg: 'pouch' })
+  const nk = W.neck_01
+  addCylinder(geo, { base: [0, nk[1] - 0.02, nk[2] + 0.005], tip: [0, nk[1] + 0.055, nk[2] + 0.005], radius: 0.085, seg: 8, joint: J('neck_01'), reg: 'vest' })
+}
+
 // helmet, orange visor, comms
 const head = { center: [0, 1.705, 0.01], radii: [0.108, 0.142, 0.128] }
-addEllipsoid(geo, { center: [0, 1.73, 0.005], radii: [0.128, 0.13, 0.15], seg: 10, rings: 4, joint: J('Head'), reg: 'helmet', vMin: -0.05, vMax: 1 })
-addEllipsoid(geo, { center: [0, 1.74, -0.05], radii: [0.12, 0.09, 0.15], seg: 10, rings: 2, joint: J('Head'), reg: 'helmet', vMin: -1, vMax: -0.1 })
+addEllipsoid(geo, { center: [0, 1.73, 0.005], radii: [0.142, 0.14, 0.162], seg: 10, rings: 4, joint: J('Head'), reg: 'helmet', vMin: -0.05, vMax: 1 })
+addEllipsoid(geo, { center: [0, 1.74, -0.05], radii: [0.134, 0.1, 0.162], seg: 10, rings: 2, joint: J('Head'), reg: 'helmet', vMin: -1, vMax: -0.1 })
 {
   const rows = []
   for (const dy of [-0.025, 0.022]) {
