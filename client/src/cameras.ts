@@ -2,6 +2,7 @@ import type { Scene } from '@babylonjs/core/scene'
 import type { ArcRotateCamera } from '@babylonjs/core/Cameras/arcRotateCamera'
 import { TargetCamera } from '@babylonjs/core/Cameras/targetCamera'
 import { Vector3 } from '@babylonjs/core/Maths/math.vector'
+import { GRAYBOX_MAP } from '../../shared/map.js'
 import type { Team } from '../../shared/protocol.js'
 import type { CameraMode } from '../../shared/testhook.js'
 
@@ -36,6 +37,11 @@ const THIRD_PERSON_START_PITCH = 0.25
 const THIRD_PERSON_PITCH = { min: -0.5, max: 1.0 }
 /** Third person: the camera never goes below this height (the ground). */
 const MIN_CAMERA_HEIGHT = 0.3
+/**
+ * Third person: the camera stays this far inside the map bounds, so looking up near an edge
+ * never puts it inside the perimeter wall just outside them (#96). Not general camera collision.
+ */
+const BOUNDS_MARGIN = 0.15
 
 const MODE_FOR_TEAM: Record<Team, CameraMode> = { ghost: 'third-person', warden: 'first-person' }
 
@@ -93,10 +99,11 @@ export function createCameraRig(scene: Scene, canvas: HTMLCanvasElement, overhea
     const lookZ = Math.cos(yaw) * cp
     const pivotX = pos.x + Math.cos(yaw) * SHOULDER_RIGHT
     const pivotZ = pos.z - Math.sin(yaw) * SHOULDER_RIGHT
+    const b = GRAYBOX_MAP.bounds
     eye.position.set(
-      pivotX - lookX * THIRD_PERSON_DISTANCE,
+      clamp(pivotX - lookX * THIRD_PERSON_DISTANCE, b.minX + BOUNDS_MARGIN, b.maxX - BOUNDS_MARGIN),
       Math.max(MIN_CAMERA_HEIGHT, pos.y + SHOULDER_HEIGHT - lookY * THIRD_PERSON_DISTANCE),
-      pivotZ - lookZ * THIRD_PERSON_DISTANCE,
+      clamp(pivotZ - lookZ * THIRD_PERSON_DISTANCE, b.minZ + BOUNDS_MARGIN, b.maxZ - BOUNDS_MARGIN),
     )
   }
 
