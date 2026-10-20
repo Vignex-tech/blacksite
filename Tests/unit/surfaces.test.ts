@@ -234,7 +234,7 @@ describe('perimeter and apron', () => {
 
   // BUG: looking fully up with the Ghost 2.7 to 3.2 m inside the bounds puts the camera
   // (clamped to 0.3 m high) inside the 1.4 m perimeter wall. Bug #96. Drop `.fails` when fixed.
-  it.fails('the third-person camera looking up is never inside the perimeter wall (known bug, see #96)', () => {
+  it('the third-person camera looking up is never inside the perimeter wall (known bug, see #96)', () => {
     const hits = cameraHitsInWall(['looking up'])
     expect(hits.slice(0, 5), `${hits.length} camera positions inside the wall`).toEqual([])
   })
