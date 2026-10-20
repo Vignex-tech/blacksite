@@ -1,8 +1,6 @@
 import { Engine } from '@babylonjs/core/Engines/engine'
 import { Scene } from '@babylonjs/core/scene'
 import { ArcRotateCamera } from '@babylonjs/core/Cameras/arcRotateCamera'
-import { HemisphericLight } from '@babylonjs/core/Lights/hemisphericLight'
-import { Color4 } from '@babylonjs/core/Maths/math.color'
 import { Vector3 } from '@babylonjs/core/Maths/math.vector'
 import { buildMap, buildTraversal, type RenderedMap, type RenderedTraversal } from './map.ts'
 import type { PlayerPose } from './net.ts'
@@ -14,6 +12,7 @@ import { createAssetLoader, type AssetLoader } from './assets/assetLoader.ts'
 import { gfxSettingsFor, type GfxSettings } from './graphics.ts'
 import { buildPerimeter, texturizeSurfaces } from './surfaces.ts'
 import { createLoadingScreen } from './loadingScreen.ts'
+import { createLighting, type Lighting } from './lighting.ts'
 import { createPerfMeter, type PerfMeter } from './perfOverlay.ts'
 
 /** Camera tilt from straight down (radians) and distance from the map centre. */
@@ -60,7 +59,6 @@ export interface GameSceneOptions {
 export function createGameScene(canvas: HTMLCanvasElement, options: GameSceneOptions = {}): GameScene {
   const engine = new Engine(canvas, true, { preserveDrawingBuffer: false, stencil: true })
   const scene = new Scene(engine)
-  scene.clearColor = new Color4(0.05, 0.06, 0.08, 1)
 
   // Overhead camera, used until your team is known and while disconnected.
   // Mostly top-down so players stay visible over the 3-unit walls, both in the
@@ -74,9 +72,6 @@ export function createGameScene(canvas: HTMLCanvasElement, options: GameSceneOpt
   overheadCamera.inputs.removeByType('ArcRotateCameraKeyboardMoveInput')
   overheadCamera.attachControl(canvas, true)
 
-  const light = new HemisphericLight('light', new Vector3(0, 1, 0), scene)
-  light.intensity = 0.9
-
   const map = buildMap(scene)
   const traversal = buildTraversal(scene)
   const terminals = createTerminalView(scene)
@@ -87,11 +82,14 @@ export function createGameScene(canvas: HTMLCanvasElement, options: GameSceneOpt
   const loader = options.loader ?? loadingScreen.track(createAssetLoader(scene))
   buildPerimeter(scene)
   texturizeSurfaces(scene, gfx, loadingScreen)
+  // After the map and its surfaces exist (it reads their bounds), before characters are created.
+  const lighting: Lighting = createLighting(scene, gfx)
   const perf = createPerfMeter(engine, scene, overlayParent)
 
   const players = createPlayerRenderer(scene, loader)
   const { upsertPlayer, removePlayer } = players
   const camera = createCameraRig(scene, canvas, overheadCamera)
+  lighting.attachPostEffects(scene.cameras)
 
   // First person: hide your own body (and its nose) from the camera. The mesh
   // keeps existing under its usual name; it is only made invisible, and is
@@ -132,6 +130,7 @@ export function createGameScene(canvas: HTMLCanvasElement, options: GameSceneOpt
       window.removeEventListener('resize', onResize)
       camera.dispose()
       perf.dispose()
+      lighting.dispose()
       loadingScreen.dispose()
       engine.dispose()
     },

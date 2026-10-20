@@ -37,7 +37,7 @@ const APRON_Y = 0
  * the face's dominant axis. `index` shifts the pattern (a stable low-frequency
  * variation derived from build order, not from ids).
  */
-export function applyWorldUVs(mesh: AbstractMesh, index: number): void {
+export function applyWorldUVs(mesh: AbstractMesh, index: number, tile: number = TILE_METRES): void {
   const pos = mesh.getVerticesData(VertexBuffer.PositionKind)
   const nor = mesh.getVerticesData(VertexBuffer.NormalKind)
   if (!pos || !nor) return
@@ -59,8 +59,8 @@ export function applyWorldUVs(mesh: AbstractMesh, index: number): void {
     if (ay >= ax && ay >= az) [u, v] = [p.x, p.z]
     else if (ax >= az) [u, v] = [p.z, p.y]
     else [u, v] = [p.x, p.y]
-    uvs[i * 2] = u / TILE_METRES + du
-    uvs[i * 2 + 1] = v / TILE_METRES + dv
+    uvs[i * 2] = u / tile + du
+    uvs[i * 2 + 1] = v / tile + dv
   }
   mesh.setVerticesData(VertexBuffer.UVKind, uvs, false)
 }
@@ -165,7 +165,10 @@ export function texturizeSurfaces(scene: Scene, gfx: GfxSettings, hooks?: Surfac
   // World-unit UVs, with a stable per-mesh offset from build order.
   let order = 0
   for (const m of scene.meshes) {
-    if (/^(solid|floor|ramp)-/.test(m.name) || m.name === 'ground') applyWorldUVs(m, order++)
+    if (/^(solid|floor|ramp)-/.test(m.name) || m.name === 'ground') {
+      const kind = (Object.keys(SURFACE_STYLE) as SurfaceKind[]).find((k) => surfaceMaterialName(k) === m.material?.name)
+      applyWorldUVs(m, order++, (kind && SURFACE_STYLE[kind].tileMetres) || TILE_METRES)
+    }
   }
 
   const pbr = gfx.tier !== 'low'
@@ -191,14 +194,15 @@ export function texturizeSurfaces(scene: Scene, gfx: GfxSettings, hooks?: Surfac
       m.albedoTexture = textures[0]
       m.albedoColor = new Color3(tr, tg, tb)
       m.bumpTexture = textures[1]
+      textures[1].level = style.bumpLevel ?? 1
       m.invertNormalMapY = true // textures are OpenGL/glTF normal maps
       m.metallicTexture = textures[2]
       m.useAmbientOcclusionFromMetallicTextureRed = true
       m.useRoughnessFromMetallicTextureGreen = true
       m.useMetallnessFromMetallicTextureBlue = true
       // The ORM already holds the metal scale (0.55 or 0); the factors pass it through.
-      m.metallic = 1
-      m.roughness = 1
+      m.metallic = style.metallic ?? 1
+      m.roughness = style.roughness ?? 1
       mat = m
     } else {
       const m = new StandardMaterial(`${kind}Tex`, scene)

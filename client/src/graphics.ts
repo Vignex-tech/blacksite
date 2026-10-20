@@ -26,14 +26,22 @@ export interface GfxSettings {
   fog: 'linear' | 'full'
   /** Practical (point) lights allowed at once. */
   maxLocalLights: number
+  /** Shadow filter: `soft` is PCF at low quality, `softer` at medium quality (high only). */
+  shadowFilter: 'none' | 'soft' | 'softer'
+  /** The shadow map is re-rendered every this many frames (moving characters are casters). */
+  shadowRefresh: number
+  /** Bloom on emissives, FXAA and filmic tone mapping through a render pipeline (high only). */
+  bloom: boolean
+  /** The moon light and the sky dome with stars (low keeps the old flat look, one light). */
+  moonAndSky: boolean
 }
 
 export const DEFAULT_GFX_TIER: GfxTier = 'medium'
 
 export const GFX_SETTINGS: Readonly<Record<GfxTier, GfxSettings>> = {
-  low: { tier: 'low', shadows: false, shadowMapSize: 0, postEffects: false, maxTextureSize: 512, fog: 'linear', maxLocalLights: 1 },
-  medium: { tier: 'medium', shadows: true, shadowMapSize: 1024, postEffects: false, maxTextureSize: 1024, fog: 'linear', maxLocalLights: 2 },
-  high: { tier: 'high', shadows: true, shadowMapSize: 1024, postEffects: true, maxTextureSize: 1024, fog: 'full', maxLocalLights: 3 },
+  low: { tier: 'low', shadows: false, shadowMapSize: 0, postEffects: false, maxTextureSize: 512, fog: 'linear', maxLocalLights: 0, shadowFilter: 'none', shadowRefresh: 0, bloom: false, moonAndSky: false },
+  medium: { tier: 'medium', shadows: true, shadowMapSize: 1024, postEffects: false, maxTextureSize: 1024, fog: 'full', maxLocalLights: 2, shadowFilter: 'soft', shadowRefresh: 2, bloom: false, moonAndSky: true },
+  high: { tier: 'high', shadows: true, shadowMapSize: 1024, postEffects: true, maxTextureSize: 1024, fog: 'full', maxLocalLights: 3, shadowFilter: 'softer', shadowRefresh: 1, bloom: true, moonAndSky: true },
 }
 
 /** Reads `gfx` from a query string (`location.search`); anything unknown gives the default. */

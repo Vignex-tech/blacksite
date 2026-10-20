@@ -31,17 +31,25 @@ export interface SurfaceStyle {
   tint: readonly [number, number, number]
   /** Flat diffuse colour (r, g, b in 0..1) used while no textured material is available. */
   fallback: readonly [number, number, number]
+  /** Metres per texture repeat; larger makes busy textures calmer (default TILE_METRES in surfaces.ts). */
+  tileMetres?: number
+  /** Normal-map strength (default 1); below 1 calms a busy set. */
+  bumpLevel?: number
+  /** Multiplier on the ORM roughness (default 1); above 1 flattens glints. */
+  roughness?: number
+  /** Multiplier on the metal scale already baked into the ORM (default 1); no environment map means metal reads dark. */
+  metallic?: number
 }
 
 export const SURFACE_STYLE: Readonly<Record<SurfaceKind, SurfaceStyle>> = {
   // Neutral greys, well away from the player colours.
   wall: { material: 'concrete_painted', tint: [1.15, 1.15, 1.15], fallback: [0.62, 0.62, 0.63] },
-  cover: { material: 'steel_painted', tint: [1, 1, 1], fallback: [0.42, 0.42, 0.43] },
+  cover: { material: 'steel_painted', tint: [1.7, 1.8, 2.0], fallback: [0.42, 0.42, 0.43], tileMetres: 70, bumpLevel: 0.2, roughness: 1 },
   // Upper-level slabs: cool blue-grey.
-  floor: { material: 'floor_plate', tint: [0.85, 1, 1.35], fallback: [0.4, 0.46, 0.55] },
+  floor: { material: 'floor_plate', tint: [1.1, 1.15, 1.35], fallback: [0.4, 0.46, 0.55], metallic: 0.3 },
   // Stairs: warm tan, so the Warden route reads at a glance.
-  ramp: { material: 'steel_brushed', tint: [1.45, 1.15, 0.8], fallback: [0.55, 0.47, 0.34] },
-  ground: { material: 'ground', tint: [1, 1, 1], fallback: [0.24, 0.24, 0.25] },
+  ramp: { material: 'steel_brushed', tint: [1.6, 1.25, 0.85], fallback: [0.55, 0.47, 0.34], metallic: 0.3 },
+  ground: { material: 'ground', tint: [2.4, 2.4, 2.45], fallback: [0.24, 0.24, 0.25] },
   // Low boundary wall around the yard (decor only).
   perimeter: { material: 'concrete_rough', tint: [0.9, 0.9, 0.92], fallback: [0.36, 0.36, 0.38] },
 }
