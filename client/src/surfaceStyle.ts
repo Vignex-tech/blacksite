@@ -44,7 +44,7 @@ export interface SurfaceStyle {
 export const SURFACE_STYLE: Readonly<Record<SurfaceKind, SurfaceStyle>> = {
   // Neutral greys, well away from the player colours.
   wall: { material: 'concrete_painted', tint: [1.15, 1.15, 1.15], fallback: [0.62, 0.62, 0.63] },
-  cover: { material: 'steel_painted', tint: [1.7, 1.8, 2.0], fallback: [0.42, 0.42, 0.43], tileMetres: 70, bumpLevel: 0.2, roughness: 1 },
+  cover: { material: 'steel_painted', tint: [1.0, 1.05, 1.15], fallback: [0.42, 0.42, 0.43], tileMetres: 70, bumpLevel: 0.2, roughness: 1 },
   // Upper-level slabs: cool blue-grey.
   floor: { material: 'floor_plate', tint: [1.1, 1.15, 1.35], fallback: [0.4, 0.46, 0.55], metallic: 0.3 },
   // Stairs: warm tan, so the Warden route reads at a glance.

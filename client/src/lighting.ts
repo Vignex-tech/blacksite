@@ -1,4 +1,5 @@
 import type { Scene } from '@babylonjs/core/scene'
+import type { Engine } from '@babylonjs/core/Engines/engine'
 import type { Camera } from '@babylonjs/core/Cameras/camera'
 import type { AbstractMesh } from '@babylonjs/core/Meshes/abstractMesh'
 import { HemisphericLight } from '@babylonjs/core/Lights/hemisphericLight'
@@ -119,7 +120,17 @@ function buildSky(scene: Scene): Mesh {
   return sky
 }
 
-export function createLighting(scene: Scene, gfx: GfxSettings, map: GrayboxMap = GRAYBOX_MAP): Lighting {
+/** A software GL renderer (SwiftShader, llvmpipe, WARP): every pixel is paid for on the CPU. */
+export function isSoftwareRenderer(scene: Scene): boolean {
+  const info = (scene.getEngine() as Engine).getGlInfo?.()
+  return /swiftshader|llvmpipe|software|softpipe|microsoft basic render/i.test(`${info?.renderer ?? ''} ${info?.vendor ?? ''}`)
+}
+
+export function createLighting(scene: Scene, requested: GfxSettings, map: GrayboxMap = GRAYBOX_MAP): Lighting {
+  // On a software renderer the heavy effects (shadow map, tone mapping, bloom pass) would drop
+  // the frame rate to a slideshow, so they are skipped there; lamps, fill, fog and sky stay.
+  const software = isSoftwareRenderer(scene)
+  const gfx: GfxSettings = software ? { ...requested, shadows: false, shadowFilter: 'none', bloom: false, maxLocalLights: 0 } : requested
   const disposables: { dispose(): void }[] = []
   const lowTier = !gfx.moonAndSky
 
@@ -140,7 +151,7 @@ export function createLighting(scene: Scene, gfx: GfxSettings, map: GrayboxMap =
   hemi.diffuse = new Color3(0.7, 0.76, 0.9)
   hemi.groundColor = new Color3(0.34, 0.36, 0.42)
   hemi.specular = Color3.Black()
-  hemi.intensity = lowTier ? 0.9 : 0.62
+  hemi.intensity = lowTier || software ? 0.9 : 0.62
   disposables.push(hemi)
 
   if (lowTier) {
@@ -154,18 +165,18 @@ export function createLighting(scene: Scene, gfx: GfxSettings, map: GrayboxMap =
 
   // Filmic tone mapping with mild contrast (in the material shaders on medium; high uses the pipeline).
   const ip = scene.imageProcessingConfiguration
-  ip.toneMappingEnabled = true
+  ip.toneMappingEnabled = !software
   ip.toneMappingType = ImageProcessingConfiguration.TONEMAPPING_ACES
   ip.contrast = 1.15
   ip.exposure = 1.05
 
-  const sky = buildSky(scene)
-  disposables.push(sky)
+  if (!software) disposables.push(buildSky(scene))
 
   const staticMeshes = scene.meshes.filter((m) => STATIC_MESH.test(m.name))
 
   // Moon: one directional light, one shadow generator.
   const moon = new DirectionalLight('fx-moon', new Vector3(-0.7, -0.85, 0.45).normalize(), scene)
+  moon.setEnabled(!software)
   moon.diffuse = new Color3(0.72, 0.8, 1)
   moon.specular = new Color3(0.4, 0.45, 0.6)
   moon.intensity = 1.8
