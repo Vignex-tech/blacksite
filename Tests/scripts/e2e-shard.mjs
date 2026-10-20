@@ -3,6 +3,7 @@
 // longer have to run one after another on the same machine.
 //   integration : every *.integration.spec.ts (SDK clients, 4 workers)
 //   browser-a   : the browser specs listed in BROWSER_A below
+//   browser-c   : characters (high tier, about 2 min alone under software GL, #86)
 //   browser-b   : every other browser spec, so a new spec lands here by default
 //   rounds      : every *.rounds.spec.ts and *.rounds.tabs.spec.ts (#67), run in
 //                 the "rounds" project against the fast-timer server (2568).
@@ -21,11 +22,14 @@ const specs = all.filter((f) => !isRounds(f))
 // About 100 s of serial browser time each; see the budget in playwright.config.ts.
 const BROWSER_A = ['m6-gate', 'm4-gate', 'hack.tabs', 'm5-gate', 'facing', 'two-players', 'client-loads', 'server']
 const isA = (f) => BROWSER_A.some((n) => f === `${n}.spec.ts`)
+const BROWSER_C = ['characters']
+const isC = (f) => BROWSER_C.some((n) => f === `${n}.spec.ts`)
 
 export const shards = {
   integration: specs.filter((f) => f.endsWith('.integration.spec.ts')),
   'browser-a': specs.filter((f) => !f.endsWith('.integration.spec.ts') && isA(f)),
-  'browser-b': specs.filter((f) => !f.endsWith('.integration.spec.ts') && !isA(f)),
+  'browser-c': specs.filter((f) => !f.endsWith('.integration.spec.ts') && isC(f)),
+  'browser-b': specs.filter((f) => !f.endsWith('.integration.spec.ts') && !isA(f) && !isC(f)),
   rounds: all.filter(isRounds),
 }
 

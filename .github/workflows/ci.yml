@@ -82,7 +82,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        shard: [integration, browser-a, browser-b, rounds]
+        shard: [integration, browser-a, browser-b, browser-c, rounds]
     steps:
       - name: Checkout
         uses: actions/checkout@v4
